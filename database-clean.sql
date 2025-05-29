@@ -1,24 +1,19 @@
--- Скрипт для исправления несовместимости типов данных
--- Выполните этот скрипт если получили ошибку о несовместимых типах
+-- Простой скрипт для полной очистки и пересоздания базы данных
+-- ВНИМАНИЕ: Удаляет все данные!
 
--- ВНИМАНИЕ: Этот скрипт удалит все существующие данные!
--- Сначала сделайте резервную копию если у вас есть важные данные
-
--- 1. Удаляем триггеры и функции (сначала триггеры, потом функции)
+-- Очистка (выполняется безопасно даже если объектов нет)
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 DROP FUNCTION IF EXISTS get_employee_stats(UUID) CASCADE;
 
--- 2. Удаляем все существующие таблицы
 DROP TABLE IF EXISTS employee_prizes CASCADE;
 DROP TABLE IF EXISTS work_sessions CASCADE;
 DROP TABLE IF EXISTS task_logs CASCADE;
 DROP TABLE IF EXISTS task_types CASCADE;
 DROP TABLE IF EXISTS employees CASCADE;
 
--- 3. Пересоздаем все с правильными типами данных
--- Таблица сотрудников
+-- Создание таблиц
 CREATE TABLE employees (
     id SERIAL PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -33,7 +28,6 @@ CREATE TABLE employees (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Таблица типов задач
 CREATE TABLE task_types (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -42,7 +36,6 @@ CREATE TABLE task_types (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Таблица логов задач
 CREATE TABLE task_logs (
     id SERIAL PRIMARY KEY,
     employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
@@ -57,7 +50,6 @@ CREATE TABLE task_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Таблица рабочих сессий
 CREATE TABLE work_sessions (
     id SERIAL PRIMARY KEY,
     employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
@@ -69,7 +61,6 @@ CREATE TABLE work_sessions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Таблица призов сотрудников
 CREATE TABLE employee_prizes (
     id SERIAL PRIMARY KEY,
     employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
@@ -90,7 +81,7 @@ CREATE INDEX idx_task_logs_task_type_id ON task_logs(task_type_id);
 CREATE INDEX idx_work_sessions_employee_id ON work_sessions(employee_id);
 CREATE INDEX idx_work_sessions_session_date ON work_sessions(session_date);
 
--- Заполнение типов задач
+-- Типы задач
 INSERT INTO task_types (name, description) VALUES
     ('Разработка', 'Программирование и разработка функций'),
     ('Тестирование', 'QA тестирование и проверка качества'),
@@ -117,74 +108,6 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_employees_updated_at 
-    BEFORE UPDATE ON employees 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- RLS политики
-ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE task_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE work_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employee_prizes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE task_types ENABLE ROW LEVEL SECURITY;
-
--- Политики для employees
-CREATE POLICY "Users can view all employees" ON employees 
-    FOR SELECT USING (true);
-CREATE POLICY "Users can update their own employee record" ON employees 
-    FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert their own employee record" ON employees 
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
--- Политики для task_logs
-CREATE POLICY "Users can view all task logs" ON task_logs 
-    FOR SELECT USING (true);
-CREATE POLICY "Users can insert their own task logs" ON task_logs 
-    FOR INSERT WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM employees 
-            WHERE employees.id = task_logs.employee_id 
-            AND employees.user_id = auth.uid()
-        )
-    );
-CREATE POLICY "Users can update their own task logs" ON task_logs 
-    FOR UPDATE USING (
-        EXISTS (
-            SELECT 1 FROM employees 
-            WHERE employees.id = task_logs.employee_id 
-            AND employees.user_id = auth.uid()
-        )
-    );
-
--- Политики для work_sessions
-CREATE POLICY "Users can view all work sessions" ON work_sessions 
-    FOR SELECT USING (true);
-CREATE POLICY "Users can manage their own work sessions" ON work_sessions 
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM employees 
-            WHERE employees.id = work_sessions.employee_id 
-            AND employees.user_id = auth.uid()
-        )
-    );
-
--- Политики для employee_prizes
-CREATE POLICY "Users can view all prizes" ON employee_prizes 
-    FOR SELECT USING (true);
-CREATE POLICY "Users can manage their own prizes" ON employee_prizes 
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM employees 
-            WHERE employees.id = employee_prizes.employee_id 
-            AND employees.user_id = auth.uid()
-        )
-    );
-
--- Политики для task_types
-CREATE POLICY "Anyone can view task types" ON task_types 
-    FOR SELECT USING (true);
-
--- Функция для создания сотрудника при регистрации
 CREATE OR REPLACE FUNCTION handle_new_user() 
 RETURNS TRIGGER AS $$
 BEGIN
@@ -198,12 +121,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Триггер для автоматического создания записи сотрудника
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION handle_new_user();
-
--- Функция для получения статистики
 CREATE OR REPLACE FUNCTION get_employee_stats(employee_user_id UUID)
 RETURNS JSON AS $$
 DECLARE
@@ -222,4 +139,49 @@ BEGIN
     
     RETURN result;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER; 
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Триггеры
+CREATE TRIGGER update_employees_updated_at 
+    BEFORE UPDATE ON employees 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- RLS политики
+ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_prizes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_types ENABLE ROW LEVEL SECURITY;
+
+-- Политики employees
+CREATE POLICY "Users can view all employees" ON employees FOR SELECT USING (true);
+CREATE POLICY "Users can update their own employee record" ON employees FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own employee record" ON employees FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Политики task_logs
+CREATE POLICY "Users can view all task logs" ON task_logs FOR SELECT USING (true);
+CREATE POLICY "Users can insert their own task logs" ON task_logs FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM employees WHERE employees.id = task_logs.employee_id AND employees.user_id = auth.uid())
+);
+CREATE POLICY "Users can update their own task logs" ON task_logs FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM employees WHERE employees.id = task_logs.employee_id AND employees.user_id = auth.uid())
+);
+
+-- Политики work_sessions
+CREATE POLICY "Users can view all work sessions" ON work_sessions FOR SELECT USING (true);
+CREATE POLICY "Users can manage their own work sessions" ON work_sessions FOR ALL USING (
+    EXISTS (SELECT 1 FROM employees WHERE employees.id = work_sessions.employee_id AND employees.user_id = auth.uid())
+);
+
+-- Политики employee_prizes
+CREATE POLICY "Users can view all prizes" ON employee_prizes FOR SELECT USING (true);
+CREATE POLICY "Users can manage their own prizes" ON employee_prizes FOR ALL USING (
+    EXISTS (SELECT 1 FROM employees WHERE employees.id = employee_prizes.employee_id AND employees.user_id = auth.uid())
+);
+
+-- Политики task_types
+CREATE POLICY "Anyone can view task types" ON task_types FOR SELECT USING (true); 
