@@ -12,6 +12,8 @@ DROP TABLE IF EXISTS task_types CASCADE;
 DROP TABLE IF EXISTS employees CASCADE;
 
 -- 2. Удаляем существующие функции и триггеры
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS update_employees_updated_at ON employees;
 DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 DROP FUNCTION IF EXISTS get_employee_stats(UUID) CASCADE;
@@ -198,6 +200,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Триггер для автоматического создания записи сотрудника
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION handle_new_user();

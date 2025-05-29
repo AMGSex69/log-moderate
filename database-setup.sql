@@ -7,6 +7,11 @@ ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 -- ВНИМАНИЕ: Удаляем существующие таблицы если они есть (будут потеряны данные!)
 -- Раскомментируйте следующие строки если нужно очистить базу данных:
 /*
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS update_employees_updated_at ON employees;
+DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+DROP FUNCTION IF EXISTS get_employee_stats(UUID) CASCADE;
 DROP TABLE IF EXISTS employee_prizes CASCADE;
 DROP TABLE IF EXISTS work_sessions CASCADE;
 DROP TABLE IF EXISTS task_logs CASCADE;
