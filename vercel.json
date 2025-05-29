@@ -1,0 +1,12 @@
+{
+	"framework": "nextjs",
+	"buildCommand": "npm run build",
+	"devCommand": "npm run dev",
+	"installCommand": "npm install --force",
+	"outputDirectory": ".next",
+	"functions": {
+		"app/**/*.tsx": {
+			"memory": 1024
+		}
+	}
+}
