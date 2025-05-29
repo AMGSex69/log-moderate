@@ -14,11 +14,21 @@
 
 ## Шаг 2: Настройка базы данных
 
+### Вариант А: Новая база данных
 1. Дождитесь завершения создания проекта
 2. Перейдите в раздел **SQL Editor** (левое меню)
 3. Создайте новый запрос
 4. Скопируйте весь код из файла `database-setup.sql` и выполните его
 5. Убедитесь, что все таблицы созданы успешно
+
+### Вариант Б: Исправление ошибки типов данных
+**Если вы получили ошибку**: `foreign key constraint "employee_prizes_employee_id_fkey" cannot be implemented` - это означает, что у вас уже есть таблицы с неправильными типами.
+
+**⚠️ ВНИМАНИЕ**: Этот способ удалит все существующие данные!
+
+1. Используйте файл `database-fix.sql` вместо `database-setup.sql`
+2. Скопируйте весь код из `database-fix.sql` в SQL Editor
+3. Выполните скрипт - он удалит старые таблицы и создаст новые с правильными типами
 
 ## Шаг 3: Получение API ключей
 
@@ -117,6 +127,17 @@ SELECT * FROM task_types;
 SELECT * FROM employees;
 ```
 
+### Проверка типов полей
+```sql
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'employees' AND column_name = 'id';
+
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'employee_prizes' AND column_name = 'employee_id';
+```
+
 ## Устранение проблем
 
 ### Ошибка подключения
@@ -131,6 +152,10 @@ SELECT * FROM employees;
 ### Проблемы с регистрацией
 - Проверьте настройки аутентификации в Supabase
 - Убедитесь, что триггер `handle_new_user` создан
+
+### Ошибки типов данных
+- Если получаете ошибки о несовместимых типах, используйте `database-fix.sql`
+- Проверьте типы данных командами выше
 
 ## Готово!
 
