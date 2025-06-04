@@ -122,12 +122,19 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			console.log("📊 Данные сессии:", session)
 
 			if (session) {
+				console.log("🔍 Подробности сессии:", {
+					id: session.id,
+					clock_in_time: session.clock_in_time,
+					clock_out_time: session.clock_out_time,
+					is_paused: session.is_paused
+				})
+
 				const workHours = getWorkHours()
 				const expectedEnd = session.clock_in_time
 					? new Date(new Date(session.clock_in_time).getTime() + workHours * 60 * 60 * 1000)
 					: null
 
-				setSessionData({
+				const newSessionData = {
 					id: session.id,
 					clockInTime: session.clock_in_time ? new Date(session.clock_in_time) : null,
 					clockOutTime: session.clock_out_time ? new Date(session.clock_out_time) : null,
@@ -138,12 +145,19 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 					totalBreakMinutes: session.total_break_minutes || 0,
 					overtimeMinutes: session.overtime_minutes || 0,
 					isAutoClockOut: session.is_auto_clocked_out || false,
-				})
+				}
+
+				console.log("🔄 Устанавливаем новое состояние:", newSessionData)
+				setSessionData(newSessionData)
 
 				// Уведомляем родительский компонент о статусе работы
 				const isWorking = session.clock_in_time && !session.clock_out_time
+				console.log("🎯 Статус работы из loadSessionData:", {
+					clock_in_time: !!session.clock_in_time,
+					clock_out_time: !!session.clock_out_time,
+					isWorking: isWorking
+				})
 				onSessionChange(isWorking)
-				console.log("🎯 Статус работы:", isWorking ? "Работает" : "Не работает")
 			} else {
 				console.log("📝 Сессия не найдена, создаем пустую")
 				setSessionData({
@@ -440,12 +454,12 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			//	await authService.updateOnlineStatus(user.id, true)
 			// }
 
-			// Загружаем данные асинхронно (не блокируя UI) с задержкой для уверенности что данные обновились
-			console.log("🔄 handleClockIn: Запускаем фоновое обновление данных через 2 секунды")
+			// Сразу перезагружаем данные чтобы синхронизироваться с БД
+			console.log("🔄 handleClockIn: Перезагружаем данные немедленно")
 			setTimeout(() => {
 				loadSessionData().catch(console.error)
 				loadWorkingEmployees().catch(console.error)
-			}, 2000)
+			}, 500) // Уменьшили с 2000 до 500мс
 
 			console.log("✅ handleClockIn: Всё успешно!")
 			toast({
