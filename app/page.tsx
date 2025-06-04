@@ -39,13 +39,10 @@ export default function Home() {
 	const { isWorking, updateSessionCache } = useWorkSession()
 	const {
 		activeTasks,
+		timers,
 		startTask,
 		stopTask,
-		removeTask,
-		stopAllTasks,
-		startAllTasks,
-		getTaskTimer,
-		getActiveTasksWithTimers,
+		updateUnits,
 	} = useMultiTimer()
 	const { toast } = useToast()
 
@@ -251,9 +248,9 @@ export default function Home() {
 
 	const handleBreakStart = async () => {
 		// Останавливаем все активные задачи
-		stopAllTasks()
 		activeTasks.forEach((task) => {
-			endSession(task.id)
+			stopTask(task.taskTypeId)
+			endSession(task.taskTypeId)
 		})
 		setIsOnBreak(true)
 	}
@@ -261,9 +258,9 @@ export default function Home() {
 	const handleBreakEnd = async () => {
 		setIsOnBreak(false)
 		// Возобновляем все активные задачи
-		startAllTasks()
 		activeTasks.forEach((task) => {
-			startSession(task.id)
+			startTask(task.taskTypeId, task.taskName)
+			startSession(task.taskTypeId)
 		})
 	}
 
@@ -346,7 +343,7 @@ export default function Home() {
 				startSession(taskId).catch((error) => {
 					console.error("Ошибка создания сессии:", error)
 					// Откатываем UI при ошибке
-					removeTask(taskId)
+					stopTask(taskId)
 
 					toast({
 						title: "Ошибка",
@@ -369,17 +366,18 @@ export default function Home() {
 				})
 			}
 		},
-		[localIsWorking, isWorking, activeTasks, isOnBreak, startTask, startSession, removeTask, toast],
+		[localIsWorking, isWorking, activeTasks, isOnBreak, startTask, startSession, stopTask, toast],
 	)
 
 	const handleStopTask = async (taskId: number) => {
-		const task = stopTask(taskId)
+		const task = activeTasks.find(t => t.taskTypeId === taskId)
 		if (!task) return
 
-		const timer = getTaskTimer(taskId)
+		const timer = timers.get(taskId)
 		if (!timer) return
 
 		await endSession(taskId)
+		stopTask(taskId)
 
 		setCompletingTask({
 			...task,
@@ -413,19 +411,22 @@ export default function Home() {
 					date: t.work_date,
 				})) || []
 
+			// Рассчитываем время выполнения задачи
+			const elapsedMinutes = Math.floor((Date.now() - completingTask.startTime.getTime()) / 60000)
+
 			// Рассчитываем очки с бонусами
 			const rewardCalc = RewardSystem.calculateReward(
-				completingTask.name,
+				completingTask.taskName,
 				units,
-				completingTask.timer.getMinutes(),
+				elapsedMinutes,
 				dailyTasksForBonus,
 			)
 
 			const { error: logError } = await supabase.from("task_logs").insert({
 				employee_id: employeeId,
-				task_type_id: completingTask.id,
+				task_type_id: completingTask.taskTypeId,
 				units_completed: units,
-				time_spent_minutes: completingTask.timer.getMinutes(),
+				time_spent_minutes: elapsedMinutes,
 				work_date: new Date().toISOString().split("T")[0],
 				notes: notes || null,
 				is_active: false,
@@ -441,22 +442,27 @@ export default function Home() {
 			// Обновляем кэш монет
 			appCache.set(`player_coins_${user.id}`, newTotalCoins, 10)
 
+			const timeFormatted = `${Math.floor(elapsedMinutes / 60)}:${(elapsedMinutes % 60).toString().padStart(2, '0')}`
+
 			toast({
 				title: "🎉 Задача завершена!",
-				description: `+${coinsEarned} очков! ${rewardCalc.bonusReasons.length > 0 ? `Бонусы: ${rewardCalc.bonusReasons.join(", ")}` : ""} Время: ${completingTask.timer.formatTime()}`,
+				description: `+${coinsEarned} очков! ${rewardCalc.bonusReasons.length > 0 ? `Бонусы: ${rewardCalc.bonusReasons.join(", ")}` : ""} Время: ${timeFormatted}`,
 			})
 
 			checkForAchievements(newTotalCoins)
 
-			// Удаляем задачу из активных
-			removeTask(completingTask.id)
 			setCompletingTask(null)
 			setShowCompletionDialog(false)
+
+			// Проверяем, есть ли выигрыш колесом фортуны (случайность 5%)
+			if (Math.random() < 0.05) {
+				setShowPrizeWheel(true)
+			}
 		} catch (error) {
-			console.error("Ошибка сохранения:", error)
+			console.error("Ошибка сохранения задачи:", error)
 			toast({
 				title: "Ошибка",
-				description: "Не удалось сохранить результат",
+				description: "Не удалось сохранить результат задачи",
 				variant: "destructive",
 			})
 		}
@@ -485,7 +491,7 @@ export default function Home() {
 	const handleSignOut = async () => {
 		// Останавливаем все активные задачи
 		activeTasks.forEach((task) => {
-			endSession(task.id)
+			endSession(task.taskTypeId)
 		})
 		await signOut()
 		toast({
@@ -550,8 +556,23 @@ export default function Home() {
 		tasks: taskTypes.filter((task) => groupData.tasks.includes(task.name)),
 	}))
 
-	// Получаем активные задачи с таймерами
-	const activeTasksWithTimers = getActiveTasksWithTimers()
+	// Получаем активные задачи с таймерами для совместимости
+	const activeTasksWithTimers = activeTasks.map(task => {
+		const timer = timers.get(task.taskTypeId)
+		return {
+			...task,
+			name: task.taskName, // Добавляем поле name для совместимости
+			timer: timer ? {
+				...timer,
+				formatTime: () => {
+					const elapsed = Math.floor((Date.now() - timer.startTime.getTime()) / 1000)
+					const minutes = Math.floor(elapsed / 60)
+					const seconds = elapsed % 60
+					return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+				}
+			} : undefined
+		}
+	})
 
 	// Показываем загрузку только если auth загружается ИЛИ данные загружаются
 	if (authLoading || (user && profile && pageLoading)) {
@@ -656,12 +677,16 @@ export default function Home() {
 									groupIcon={group.icon}
 									groupColor={group.color}
 									tasks={group.tasks}
-									activeTasks={activeTasks.map((task) => task.id)}
+									activeTasks={activeTasks.map((task) => task.taskTypeId)}
 									onStartTask={handleStartTask}
 									onStopTask={handleStopTask}
 									getTaskTime={(taskId) => {
-										const timer = getTaskTimer(taskId)
-										return timer?.formatTime()
+										const timer = timers.get(taskId)
+										if (!timer) return "00:00"
+										const elapsed = Math.floor((Date.now() - timer.startTime.getTime()) / 1000)
+										const minutes = Math.floor(elapsed / 60)
+										const seconds = elapsed % 60
+										return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 									}}
 								/>
 							))}
@@ -705,9 +730,13 @@ export default function Home() {
 						isOpen={showCompletionDialog}
 						onClose={() => setShowCompletionDialog(false)}
 						onSave={handleSaveCompletion}
-						taskName={completingTask?.name || ""}
-						timeSpent={completingTask?.timer?.formatTime() || ""}
-						taskId={completingTask?.id}
+						taskName={completingTask?.taskName || ""}
+						timeSpent={(() => {
+							if (!completingTask) return "00:00"
+							const elapsed = Math.floor((Date.now() - completingTask.startTime.getTime()) / 60000)
+							return `${Math.floor(elapsed / 60)}:${(elapsed % 60).toString().padStart(2, '0')}`
+						})()}
+						taskId={completingTask?.taskTypeId}
 					/>
 
 					{/* Попап достижений */}
