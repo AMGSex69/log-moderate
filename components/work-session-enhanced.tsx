@@ -297,14 +297,14 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 		}
 	}, [user, loadSessionData])
 
-	// Загружаем работающих сотрудников с интервалом
+	// ОТКЛЮЧЕНО: Загружаем работающих сотрудников с интервалом
 	useEffect(() => {
 		if (user) {
 			loadWorkingEmployees()
 
-			// Обновляем список работающих сотрудников каждые 30 секунд
-			const interval = setInterval(loadWorkingEmployees, 30000)
-			return () => clearInterval(interval)
+			// ОТКЛЮЧЕНО: Убираем автоматическое обновление списка работающих сотрудников
+			// const interval = setInterval(loadWorkingEmployees, 30000)
+			// return () => clearInterval(interval)
 		}
 	}, [user, loadWorkingEmployees])
 
@@ -434,11 +434,11 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			console.log("🔄 handleClockIn: Уведомляем о смене статуса работы")
 			onSessionChange(true)
 
-			// Обновляем статус онлайн
-			console.log("🔄 handleClockIn: Обновляем статус онлайн")
-			if (user) {
-				await authService.updateOnlineStatus(user.id, true)
-			}
+			// ОТКЛЮЧЕНО: Убираем обновление статуса онлайн
+			// console.log("🔄 handleClockIn: Обновляем статус онлайн")
+			// if (user) {
+			//	await authService.updateOnlineStatus(user.id, true)
+			// }
 
 			// Загружаем данные асинхронно (не блокируя UI) с задержкой для уверенности что данные обновились
 			console.log("🔄 handleClockIn: Запускаем фоновое обновление данных через 2 секунды")
@@ -547,10 +547,10 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 
 			if (error) throw error
 
-			// Обновляем статус онлайн
-			if (user) {
-				await authService.updateOnlineStatus(user.id, false)
-			}
+			// ОТКЛЮЧЕНО: Убираем обновление статуса онлайн
+			// if (user) {
+			//	await authService.updateOnlineStatus(user.id, false)
+			// }
 
 			await loadSessionData()
 			await loadWorkingEmployees() // Обновляем список работающих

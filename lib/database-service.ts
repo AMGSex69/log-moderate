@@ -27,7 +27,12 @@ export class DatabaseService {
 			.order("full_name")
 	}
 
+	// ОТКЛЮЧЕНО: Обновление онлайн статуса сотрудника
 	static async updateEmployeeOnlineStatus(userId: string, isOnline: boolean) {
+		// Больше не обновляем онлайн статус для улучшения производительности
+		return { data: null, error: null }
+
+		/* ОТКЛЮЧЕННЫЙ КОД:
 		return await supabase
 			.from("employees")
 			.update({
@@ -36,6 +41,7 @@ export class DatabaseService {
 				updated_at: new Date().toISOString()
 			})
 			.eq("user_id", userId)
+		*/
 	}
 
 	// Task Types
@@ -185,7 +191,12 @@ export class DatabaseService {
 			.single()
 	}
 
+	// ОТКЛЮЧЕНО: Обновление heartbeat активной сессии
 	static async updateActiveSessionHeartbeat(sessionId: number, currentUnits?: number) {
+		// Больше не обновляем heartbeat для улучшения производительности
+		return { data: null, error: null }
+
+		/* ОТКЛЮЧЕННЫЙ КОД:
 		return await supabase
 			.from("active_sessions")
 			.update({
@@ -193,16 +204,19 @@ export class DatabaseService {
 				...(currentUnits !== undefined && { current_units: currentUnits })
 			})
 			.eq("id", sessionId)
+		*/
 	}
 
+	// ОТКЛЮЧЕНО: Пауза активной сессии
 	static async pauseActiveSession(sessionId: number) {
-		// Мы можем добавить поле is_paused в active_sessions если нужно
-		// Пока просто обновляем heartbeat
-		return await this.updateActiveSessionHeartbeat(sessionId)
+		// Больше не обновляем heartbeat
+		return { data: null, error: null }
 	}
 
+	// ОТКЛЮЧЕНО: Возобновление активной сессии
 	static async resumeActiveSession(sessionId: number) {
-		return await this.updateActiveSessionHeartbeat(sessionId)
+		// Больше не обновляем heartbeat
+		return { data: null, error: null }
 	}
 
 	static async endActiveSession(sessionId: number) {
@@ -220,26 +234,24 @@ export class DatabaseService {
 			.eq("is_active", true)
 	}
 
+	// ОТКЛЮЧЕНО: Переключение активной задачи
 	static async switchActiveTask(employeeId: number, newTaskTypeId: number) {
-		// Получаем текущие активные сессии
+		// Упрощенная версия без heartbeat обновлений
 		const { data: currentSessions } = await this.getActiveSessionsByEmployee(employeeId)
 
 		if (!currentSessions?.length) {
-			// Нет активных сессий, создаем новую
 			return await this.createActiveSession({
 				employee_id: employeeId,
 				task_type_id: newTaskTypeId
 			})
 		}
 
-		// Ищем сессию с указанной задачей
 		const existingSession = currentSessions.find(s => s.task_type_id === newTaskTypeId)
 
 		if (existingSession) {
-			// Возобновляем существующую сессию
-			return await this.updateActiveSessionHeartbeat(existingSession.id)
+			// Просто возвращаем существующую сессию без обновления heartbeat
+			return { data: existingSession, error: null }
 		} else {
-			// Создаем новую сессию для новой задачи
 			return await this.createActiveSession({
 				employee_id: employeeId,
 				task_type_id: newTaskTypeId
@@ -247,8 +259,12 @@ export class DatabaseService {
 		}
 	}
 
-	// Метод для очистки "мертвых" сессий (не обновлялись долгое время)
+	// ОТКЛЮЧЕНО: Очистка неактивных сессий
 	static async cleanupIdleSessions() {
+		// Больше не очищаем сессии автоматически
+		return { data: null, error: null }
+
+		/* ОТКЛЮЧЕННЫЙ КОД:
 		const { GAME_CONFIG } = await import('./game-config')
 		const timeoutMinutes = GAME_CONFIG.MULTITASK_CONFIG.idle_task_timeout
 		const timeoutThreshold = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString()
@@ -258,6 +274,7 @@ export class DatabaseService {
 			.update({ is_active: false })
 			.eq("is_active", true)
 			.lt("last_heartbeat", timeoutThreshold)
+		*/
 	}
 
 	// Break Logs

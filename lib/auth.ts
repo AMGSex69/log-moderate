@@ -225,8 +225,12 @@ export const authService = {
 		}
 	},
 
-	// Обновить статус онлайн
+	// ОТКЛЮЧЕНО: Обновить статус онлайн
 	async updateOnlineStatus(userId: string, isOnline: boolean) {
+		// Больше не обновляем онлайн статус для улучшения производительности
+		return { error: null }
+
+		/* ОТКЛЮЧЕННЫЙ КОД:
 		try {
 			// Пробуем обновить в user_profiles
 			const { error: userProfileError } = await supabase
@@ -256,6 +260,7 @@ export const authService = {
 			console.error("❌ Error updating online status:", error)
 			return { error }
 		}
+		*/
 	},
 }
 
