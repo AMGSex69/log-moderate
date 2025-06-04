@@ -63,9 +63,9 @@ export default function Home() {
 	const [wonPrize, setWonPrize] = useState<Prize | null>(null)
 
 	const initializingRef = useRef(false)
-	const timeUpdateRef = useRef<NodeJS.Timeout>()
-	const achievementTimeoutRef = useRef<NodeJS.Timeout>()
-	const dataInitTimeoutRef = useRef<NodeJS.Timeout>()
+	const timeUpdateRef = useRef<NodeJS.Timeout | null>(null)
+	const achievementTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+	const dataInitTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
 	// Оптимизированное обновление времени с учетом видимости вкладки
 	useEffect(() => {
@@ -252,8 +252,8 @@ export default function Home() {
 	const handleBreakStart = async () => {
 		// Останавливаем все активные задачи
 		stopAllTasks()
-		activeTasks.forEach(() => {
-			endSession()
+		activeTasks.forEach((task) => {
+			endSession(task.id)
 		})
 		setIsOnBreak(true)
 	}
@@ -379,7 +379,7 @@ export default function Home() {
 		const timer = getTaskTimer(taskId)
 		if (!timer) return
 
-		await endSession()
+		await endSession(taskId)
 
 		setCompletingTask({
 			...task,
@@ -406,8 +406,8 @@ export default function Home() {
 				.eq("work_date", today)
 
 			const dailyTasksForBonus =
-				todayTasks?.map((t) => ({
-					taskName: t.task_types.name,
+				todayTasks?.map((t: any) => ({
+					taskName: t.task_types?.name,
 					units: t.units_completed,
 					timeMinutes: t.time_spent_minutes,
 					date: t.work_date,
@@ -464,9 +464,9 @@ export default function Home() {
 
 	const checkForAchievements = (coins: number) => {
 		if (coins >= 1000 && playerCoins < 1000) {
-			const achievement = GAME_CONFIG.ACHIEVEMENTS.find((a) => a.id === "thousand_club")
+			const achievement = GAME_CONFIG.ACHIEVEMENTS["thousand_club"]
 			if (achievement) {
-				setNewAchievement(achievement)
+				setNewAchievement({ id: "thousand_club", ...achievement })
 				// Показываем крутилку вместо обычной награды
 				achievementTimeoutRef.current = setTimeout(() => {
 					setShowPrizeWheel(true)
@@ -476,16 +476,16 @@ export default function Home() {
 	}
 
 	const checkForMultitaskingAchievement = () => {
-		const achievement = GAME_CONFIG.ACHIEVEMENTS.find((a) => a.id === "multitasker")
+		const achievement = GAME_CONFIG.ACHIEVEMENTS["multitasker"]
 		if (achievement) {
-			setNewAchievement(achievement)
+			setNewAchievement({ id: "multitasker", ...achievement })
 		}
 	}
 
 	const handleSignOut = async () => {
 		// Останавливаем все активные задачи
-		activeTasks.forEach(() => {
-			endSession()
+		activeTasks.forEach((task) => {
+			endSession(task.id)
 		})
 		await signOut()
 		toast({
@@ -538,7 +538,7 @@ export default function Home() {
 		// Очищаем таймер если он есть
 		if (achievementTimeoutRef.current) {
 			clearTimeout(achievementTimeoutRef.current)
-			achievementTimeoutRef.current = undefined
+			achievementTimeoutRef.current = null
 		}
 	}
 

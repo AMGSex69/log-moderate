@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
+import type { Database } from "./database-types"
 
-// Суpabase конфигурация
+// Supabase конфигурация
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
@@ -8,43 +9,49 @@ if (!supabaseUrl || !supabaseAnonKey) {
 	throw new Error("Missing Supabase environment variables")
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Создаем типизированный клиент
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
 
 export const getSupabaseClient = () => supabase
 
-export type TaskType = {
-	id: number
-	name: string
-	description: string
-}
+// Реэкспортируем все типы из database-types
+export type {
+	Employee,
+	TaskType,
+	TaskLog,
+	WorkSession,
+	ActiveSession,
+	BreakLog,
+	EmployeePrize,
+	EmployeeCurrentStatus,
+	TaskLogDetailed,
+	EmployeeStats,
+	TaskAnalytics,
+	TaskPerformer,
+	TaskPeriodStats,
+	DashboardStats,
+	TopPerformer,
+	TaskDistribution,
+	DailyTrend,
+	GroupPerformance,
+	WorkingEmployee,
+	TimelineSegment,
+	EmployeeTimelineData,
+	WorkloadData,
+	TaskLeaderboardEntry,
+	DateRange,
+	PeriodType,
+	TaskGroup,
+	EmployeeStatsResponse,
+	EmployeeDashboardStatsResponse,
+	CreateTaskLogRequest,
+	CreateWorkSessionRequest,
+	UpdateWorkSessionRequest,
+	CreateActiveSessionRequest,
+	CreateBreakLogRequest,
+	GameConfig,
+	Database
+} from "./database-types"
 
-export type Employee = {
-	id: string
-	email: string
-	full_name: string
-	position: string
-	is_active: boolean
-	is_online?: boolean
-	last_seen?: string
-}
-
-export type TaskLog = {
-	id: number
-	employee_id: string
-	task_type_id: number
-	units_completed: number
-	time_spent_minutes: number
-	work_date: string
-	notes?: string
-	created_at: string
-	task_types?: TaskType
-	employees?: Employee
-}
-
-export type EmployeeStats = {
-	employee_id: string
-	full_name: string
-	total_tasks: number
-	total_time: number
-	total_units: number
-}
+// Экспортируем сервис базы данных
+export { DatabaseService } from "./database-service"

@@ -164,7 +164,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			toast({
 				title: "Ошибка",
 				description: "Не удалось загрузить данные рабочей смены",
-				variant: "destructive",
+				variant: "destructive" as const,
 			})
 		} finally {
 			setLoading(false)
@@ -231,7 +231,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			}
 
 			// Получаем типы задач если есть активные задачи
-			let taskTypes = []
+			let taskTypes: any[] = []
 			if (activeTasks && activeTasks.length > 0) {
 				const taskTypeIds = activeTasks.map((task) => task.task_type_id)
 				const { data: types, error: typesError } = await supabase
@@ -314,52 +314,80 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 	}
 
 	const handleClockIn = async () => {
-		if (!user || !profile) return
+		console.log("🎯 handleClockIn: Начало функции")
+		console.log("🎯 handleClockIn: user =", !!user, "profile =", !!profile)
+
+		if (!user || !profile) {
+			console.error("❌ handleClockIn: Нет пользователя или профиля")
+			return
+		}
 
 		try {
+			console.log("🔍 handleClockIn: Получаем employeeId для user:", user.id)
 			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
-			if (empError || !employeeId) throw new Error("Employee not found")
+			console.log("🔍 handleClockIn: employeeId =", employeeId, "error =", empError)
+
+			if (empError || !employeeId) {
+				console.error("❌ handleClockIn: Employee not found", empError)
+				throw new Error("Employee not found")
+			}
 
 			const now = new Date()
 			const workHours = getWorkHours()
 			const expectedEnd = new Date(now.getTime() + workHours * 60 * 60 * 1000)
+			console.log("⏰ handleClockIn: workHours =", workHours, "expectedEnd =", expectedEnd)
 
 			// Сначала проверяем, есть ли уже сессия на сегодня
+			console.log("🔍 handleClockIn: Проверяем существующую сессию")
 			const { data: existingSession, error: checkError } = await supabase
 				.from("work_sessions")
-				.select("id, clock_out_time")
+				.select("id, clock_out_time, clock_in_time")
 				.eq("employee_id", employeeId)
 				.eq("date", now.toISOString().split("T")[0])
 				.single()
 
-			if (checkError && checkError.code !== "PGRST116") {
-				throw checkError
-			}
+			console.log("📊 handleClockIn: existingSession =", existingSession, "checkError =", checkError)
 
 			let sessionData
 			if (existingSession) {
+				console.log("🔄 handleClockIn: Обновляем существующую сессию")
+				console.log("📝 handleClockIn: Сессия ДО обновления:", {
+					id: existingSession.id,
+					clock_in_time: existingSession.clock_in_time,
+					clock_out_time: existingSession.clock_out_time
+				})
+
 				// Если сессия существует, обновляем её (повторное начало дня)
+				const updateData = {
+					clock_in_time: now.toISOString(),
+					clock_out_time: null, // Сбрасываем время окончания
+					expected_end_time: expectedEnd.toISOString(),
+					is_paused: false,
+					pause_start_time: null,
+					total_work_minutes: 0,
+					total_break_minutes: 0,
+					overtime_minutes: 0,
+					is_auto_clocked_out: false,
+					updated_at: now.toISOString(),
+				}
+
+				console.log("📝 handleClockIn: Данные для обновления:", updateData)
+
 				const { data, error } = await supabase
 					.from("work_sessions")
-					.update({
-						clock_in_time: now.toISOString(),
-						clock_out_time: null, // Сбрасываем время окончания
-						expected_end_time: expectedEnd.toISOString(),
-						is_paused: false,
-						pause_start_time: null,
-						total_work_minutes: 0,
-						total_break_minutes: 0,
-						overtime_minutes: 0,
-						is_auto_clocked_out: false,
-						updated_at: now.toISOString(),
-					})
+					.update(updateData)
 					.eq("id", existingSession.id)
 					.select()
 					.single()
 
-				if (error) throw error
+				if (error) {
+					console.error("❌ handleClockIn: Ошибка обновления сессии", error)
+					throw error
+				}
 				sessionData = data
+				console.log("✅ handleClockIn: Сессия ПОСЛЕ обновления:", sessionData)
 			} else {
+				console.log("➕ handleClockIn: Создаём новую сессию")
 				// Если сессии нет, создаем новую
 				const { data, error } = await supabase
 					.from("work_sessions")
@@ -376,26 +404,60 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 					.select()
 					.single()
 
-				if (error) throw error
+				if (error) {
+					console.error("❌ handleClockIn: Ошибка создания сессии", error)
+					throw error
+				}
 				sessionData = data
+				console.log("✅ handleClockIn: Новая сессия создана", sessionData)
 			}
 
+			// ВАЖНО: Немедленно обновляем локальное состояние
+			console.log("🔄 handleClockIn: Обновляем локальное состояние")
+			const newSessionData: WorkSessionData = {
+				id: sessionData.id,
+				clockInTime: new Date(sessionData.clock_in_time),
+				clockOutTime: sessionData.clock_out_time ? new Date(sessionData.clock_out_time) : null,
+				expectedEndTime: expectedEnd,
+				isPaused: false,
+				pauseStartTime: null,
+				totalWorkMinutes: 0,
+				totalBreakMinutes: 0,
+				overtimeMinutes: 0,
+				isAutoClockOut: false,
+			}
+
+			setSessionData(newSessionData)
+			console.log("✅ handleClockIn: Локальное состояние обновлено", newSessionData)
+
+			// Уведомляем родительский компонент НЕМЕДЛЕННО
+			console.log("🔄 handleClockIn: Уведомляем о смене статуса работы")
+			onSessionChange(true)
+
 			// Обновляем статус онлайн
-			await authService.updateOnlineStatus(user.id, true)
+			console.log("🔄 handleClockIn: Обновляем статус онлайн")
+			if (user) {
+				await authService.updateOnlineStatus(user.id, true)
+			}
 
-			await loadSessionData()
-			await loadWorkingEmployees() // Обновляем список работающих
+			// Загружаем данные асинхронно (не блокируя UI) с задержкой для уверенности что данные обновились
+			console.log("🔄 handleClockIn: Запускаем фоновое обновление данных через 2 секунды")
+			setTimeout(() => {
+				loadSessionData().catch(console.error)
+				loadWorkingEmployees().catch(console.error)
+			}, 2000)
 
+			console.log("✅ handleClockIn: Всё успешно!")
 			toast({
 				title: "🎯 Рабочий день начат!",
 				description: `Ожидаемое окончание: ${expectedEnd.toLocaleTimeString()}`,
 			})
 		} catch (error) {
-			console.error("Ошибка начала смены:", error)
+			console.error("💥 handleClockIn: Критическая ошибка:", error)
 			toast({
 				title: "Ошибка",
 				description: "Не удалось начать рабочий день",
-				variant: "destructive",
+				variant: "destructive" as const,
 			})
 		}
 	}
@@ -440,7 +502,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			toast({
 				title: "Ошибка",
 				description: "Не удалось изменить статус паузы",
-				variant: "destructive",
+				variant: "destructive" as const,
 			})
 		}
 	}
@@ -486,7 +548,9 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			if (error) throw error
 
 			// Обновляем статус онлайн
-			await authService.updateOnlineStatus(user.id, false)
+			if (user) {
+				await authService.updateOnlineStatus(user.id, false)
+			}
 
 			await loadSessionData()
 			await loadWorkingEmployees() // Обновляем список работающих
@@ -501,7 +565,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			toast({
 				title: "Ошибка",
 				description: "Не удалось завершить рабочий день",
-				variant: "destructive",
+				variant: "destructive" as const,
 			})
 		}
 	}
@@ -543,6 +607,11 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 	}
 
 	const isWorking = sessionData.clockInTime && !sessionData.clockOutTime
+	console.log("🎯 isWorking calculation:", {
+		clockInTime: !!sessionData.clockInTime,
+		clockOutTime: !!sessionData.clockOutTime,
+		isWorking: isWorking
+	})
 
 	if (loading) {
 		return (
@@ -586,18 +655,35 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 					) : (
 						<div className="space-y-4">
 							{/* Информация о времени */}
-							<div className="grid grid-cols-2 gap-4 text-sm">
-								<div>
-									<div className="text-muted-foreground">Начало смены</div>
-									<div className="font-mono">{formatTime(sessionData.clockInTime!)}</div>
+							<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+								<div className="space-y-2">
+									<div className="text-sm text-muted-foreground">Время начала</div>
+									<div className="text-lg font-mono">{sessionData.clockInTime ? formatTime(sessionData.clockInTime) : "—"}</div>
 								</div>
-								<div>
-									<div className="text-muted-foreground">Ожидаемый конец</div>
-									<div className="font-mono">
+								<div className="space-y-2">
+									<div className="text-sm text-muted-foreground">Ожидаемое окончание</div>
+									<div className="text-lg font-mono">
 										{sessionData.expectedEndTime ? formatTime(sessionData.expectedEndTime) : "—"}
 									</div>
 								</div>
+								<div className="space-y-2">
+									<div className="text-sm text-muted-foreground">Отработано</div>
+									<div className="text-lg font-mono">{formatDuration(getCurrentWorkTime())}</div>
+								</div>
+								<div className="space-y-2">
+									<div className="text-sm text-muted-foreground">Переработки</div>
+									<div className={`text-lg font-mono ${getOvertimeMinutes() > 0 ? "text-red-600" : ""}`}>
+										{formatDuration(getOvertimeMinutes())}
+									</div>
+								</div>
 							</div>
+
+							{sessionData.clockOutTime && (
+								<div className="mb-4 p-3 bg-muted rounded-lg">
+									<div className="text-sm text-muted-foreground mb-1">Рабочий день завершен</div>
+									<div className="text-lg font-mono">{formatTime(sessionData.clockOutTime)}</div>
+								</div>
+							)}
 
 							{/* Центральный таймер */}
 							<PixelCard className="bg-gradient-to-r from-blue-50 to-purple-50">
@@ -634,7 +720,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 									)}
 								</PixelButton>
 
-								<PixelButton onClick={() => setShowEndDialog(true)} variant="destructive" className="w-full">
+								<PixelButton onClick={() => setShowEndDialog(true)} variant="danger" className="w-full">
 									<LogOut className="h-4 w-4 mr-2" />
 									Завершить день
 								</PixelButton>
@@ -684,9 +770,10 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 										</div>
 										<div>
 											До:{" "}
-											{new Date(employee.expected_end_time).toLocaleTimeString("ru-RU", {
+											{employee.expected_end_time ? new Date(employee.expected_end_time).toLocaleTimeString("ru-RU", {
 												hour: "2-digit",
-											})}
+												minute: "2-digit",
+											}) : "—"}
 										</div>
 									</div>
 								</div>

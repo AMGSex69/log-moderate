@@ -165,9 +165,64 @@ export const authService = {
 
 	// Получить employee ID для текущего пользователя
 	async getEmployeeId(userId: string) {
-		const { data, error } = await supabase.from("employees").select("id").eq("user_id", userId).single()
+		try {
+			console.log("🔍 Ищем employee для пользователя:", userId)
 
-		return { employeeId: data?.id, error }
+			const { data, error } = await supabase
+				.from("employees")
+				.select("id")
+				.eq("user_id", userId)
+				.single()
+
+			if (!error && data) {
+				console.log("✅ Employee найден:", data.id)
+				return { employeeId: data.id, error: null }
+			}
+
+			// Если employee не найден, пытаемся создать
+			console.log("⚠️ Employee не найден, создаем новый...")
+
+			// Получаем информацию о пользователе для заполнения полей
+			const { data: userData } = await supabase.auth.getUser()
+			const fullName = userData.user?.user_metadata?.full_name || userData.user?.email?.split('@')[0] || 'Сотрудник'
+
+			const { data: newEmployee, error: createError } = await supabase
+				.from("employees")
+				.insert({
+					user_id: userId,
+					full_name: fullName,
+					position: 'Сотрудник',
+					is_admin: false,
+					is_active: true,
+					work_schedule: '8+1',
+					work_hours: 8,
+					is_online: false,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				})
+				.select("id")
+				.single()
+
+			if (!createError && newEmployee) {
+				console.log("✅ Employee создан:", newEmployee.id)
+				return { employeeId: newEmployee.id, error: null }
+			}
+
+			console.error("❌ Ошибка создания employee:", createError)
+
+			// Возвращаем понятную ошибку
+			return {
+				employeeId: null,
+				error: new Error(`Не удается найти или создать запись сотрудника. Обратитесь к администратору. (Детали: ${createError?.message || 'неизвестная ошибка'})`)
+			}
+
+		} catch (error) {
+			console.error("❌ Критическая ошибка в getEmployeeId:", error)
+			return {
+				employeeId: null,
+				error: new Error(`Критическая ошибка при работе с записью сотрудника: ${error}`)
+			}
+		}
 	},
 
 	// Обновить статус онлайн

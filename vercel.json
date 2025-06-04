@@ -2,11 +2,32 @@
 	"framework": "nextjs",
 	"buildCommand": "npm run build",
 	"devCommand": "npm run dev",
-	"installCommand": "npm install --force",
-	"outputDirectory": ".next",
+	"installCommand": "npm install",
+	"regions": [
+		"fra1"
+	],
 	"functions": {
-		"app/**/*.tsx": {
-			"memory": 1024
+		"app/**": {
+			"maxDuration": 30
 		}
-	}
+	},
+	"headers": [
+		{
+			"source": "/(.*)",
+			"headers": [
+				{
+					"key": "X-Content-Type-Options",
+					"value": "nosniff"
+				},
+				{
+					"key": "X-Frame-Options",
+					"value": "DENY"
+				},
+				{
+					"key": "X-XSS-Protection",
+					"value": "1; mode=block"
+				}
+			]
+		}
+	]
 }
