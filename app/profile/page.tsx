@@ -21,7 +21,7 @@ import Navigation from "@/components/navigation"
 import AuthGuard from "@/components/auth/auth-guard"
 import PrizeWheel from "@/components/prize-wheel"
 import AvatarUpload from "@/components/avatar-upload"
-import UserTaskAnalytics from "@/components/user-task-analytics"
+import DailyTaskStats from "@/components/daily-task-stats"
 import { Trophy, Target, Clock, TrendingUp, ArrowLeft, Edit, Users, Building, Calendar, Activity } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
@@ -481,7 +481,7 @@ export default function ProfilePage() {
 
 								{/* Вкладка "Мои задачи" */}
 								<TabsContent value="tasks" className="mt-6 space-y-6">
-									<UserTaskAnalytics userId={user!.id} />
+									<DailyTaskStats userId={user!.id} />
 								</TabsContent>
 
 								{/* Вкладка "Офис" */}
