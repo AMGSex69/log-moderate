@@ -16,6 +16,7 @@ export type UserProfile = {
 	updated_at: string
 	office_id?: number
 	office_name?: string
+	avatar_url?: string
 	office_stats?: {
 		total_employees: number
 		working_employees: number
