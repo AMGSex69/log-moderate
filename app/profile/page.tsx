@@ -20,6 +20,8 @@ import CoinDisplay from "@/components/coin-display"
 import Navigation from "@/components/navigation"
 import AuthGuard from "@/components/auth/auth-guard"
 import PrizeWheel from "@/components/prize-wheel"
+import AvatarUpload from "@/components/avatar-upload"
+import UserTaskAnalytics from "@/components/user-task-analytics"
 import { Trophy, Target, Clock, TrendingUp, ArrowLeft, Edit, Users, Building, Calendar, Activity } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
@@ -479,66 +481,7 @@ export default function ProfilePage() {
 
 								{/* Вкладка "Мои задачи" */}
 								<TabsContent value="tasks" className="mt-6 space-y-6">
-									<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-										<PixelCard>
-											<div className="p-4 text-center">
-												<div className="text-2xl font-bold">{stats.total_units}</div>
-												<div className="text-sm text-muted-foreground">Единиц выполнено</div>
-											</div>
-										</PixelCard>
-
-										<PixelCard>
-											<div className="p-4 text-center">
-												<div className="text-lg font-bold">{formatDuration(stats.avg_time_per_task)}</div>
-												<div className="text-sm text-muted-foreground">Среднее время на задачу</div>
-											</div>
-										</PixelCard>
-
-										<PixelCard>
-											<div className="p-4 text-center">
-												<div className="text-lg font-bold">{stats.most_productive_day}</div>
-												<div className="text-sm text-muted-foreground">Самый продуктивный день</div>
-											</div>
-										</PixelCard>
-									</div>
-
-									<PixelCard>
-										<div className="p-6">
-											<h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-												<Activity className="h-5 w-5" />
-												История задач (последние 20)
-											</h3>
-
-											{taskHistory.length > 0 ? (
-												<div className="space-y-3 max-h-96 overflow-y-auto">
-													{taskHistory.map((task) => (
-														<div key={task.id} className="flex items-center justify-between p-3 bg-white border-2 border-black rounded">
-															<div className="flex-1">
-																<div className="font-semibold">{task.task_name}</div>
-																<div className="text-sm text-muted-foreground">
-																	{task.units_completed} ед. • {formatDuration(task.time_spent_minutes)} • {new Date(task.work_date).toLocaleDateString("ru-RU")}
-																</div>
-																{task.notes && (
-																	<div className="text-xs text-gray-600 mt-1">{task.notes}</div>
-																)}
-															</div>
-															<div className="text-right">
-																<div className="text-sm font-bold text-green-600">
-																	+{task.units_completed * (GAME_CONFIG.TASK_REWARDS[task.task_name] || 5)} очков
-																</div>
-															</div>
-														</div>
-													))}
-												</div>
-											) : (
-												<div className="text-center py-8">
-													<div className="text-4xl mb-2">📝</div>
-													<div className="text-lg font-semibold">Пока нет выполненных задач</div>
-													<div className="text-muted-foreground">Начните работать, чтобы увидеть историю</div>
-												</div>
-											)}
-										</div>
-									</PixelCard>
+									<UserTaskAnalytics userId={user!.id} />
 								</TabsContent>
 
 								{/* Вкладка "Офис" */}
@@ -728,6 +671,9 @@ export default function ProfilePage() {
 										<PrizeWheel
 											currentCoins={stats.total_coins}
 											onClose={() => setShowWheel(false)}
+											onPrizeWon={(prize) => {
+												console.log("Выигран приз:", prize)
+											}}
 											onCoinsSpent={(amount) => {
 												setStats(prev => ({
 													...prev,
@@ -756,27 +702,15 @@ export default function ProfilePage() {
 										<PixelCard>
 											<div className="p-6 space-y-6">
 												{/* Аватар */}
-												<div className="flex items-center gap-4">
-													<Avatar className="h-20 w-20 border-4 border-black">
-														<AvatarImage src={profileData.avatar_url} />
-														<AvatarFallback className="bg-gradient-to-r from-blue-400 to-purple-500 text-white text-2xl font-bold">
-															{profileData.full_name.split(' ').map(n => n[0]).join('').toUpperCase() || 'П'}
-														</AvatarFallback>
-													</Avatar>
-													{editingProfile && (
-														<div className="space-y-2">
-															<Label htmlFor="avatar">Ссылка на аватар</Label>
-															<Input
-																id="avatar"
-																value={profileData.avatar_url}
-																onChange={(e) => setProfileData(prev => ({
-																	...prev,
-																	avatar_url: e.target.value
-																}))}
-																placeholder="https://example.com/avatar.jpg"
-															/>
-														</div>
-													)}
+												<div>
+													<Label>Аватар</Label>
+													<div className="mt-2">
+														<AvatarUpload
+															currentUrl={profileData.avatar_url || ''}
+															fullName={profileData.full_name}
+															onAvatarChange={(newUrl) => setProfileData(prev => ({ ...prev, avatar_url: newUrl }))}
+														/>
+													</div>
 												</div>
 
 												{/* ФИО */}
