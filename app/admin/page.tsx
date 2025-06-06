@@ -1,44 +1,43 @@
-import DailyTimeline from "@/components/admin/daily-timeline"
-import EmployeeAnalytics from "@/components/admin/employee-analytics"
-import TaskAnalyticsNew from "@/components/admin/task-analytics-new"
-import GeneralDashboard from "@/components/admin/general-dashboard"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import Navigation from "@/components/navigation"
-import AuthGuard from "@/components/auth/auth-guard"
+"use client"
+
+import { redirect } from "next/navigation"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Shield, Home } from "lucide-react"
+import EnhancedDashboardV2 from "@/components/admin/enhanced-dashboard-v2"
+import { supabase } from "@/lib/supabase"
 
 export default function AdminPage() {
-  return (
-    <AuthGuard>
-      <main className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 p-4">
-        <div className="container mx-auto py-6">
-          <Navigation />
+	// Simple redirect approach - if user doesn't have access, they'll be redirected by the component
+	return (
+		<div className="container mx-auto px-4 py-8">
+			<Card className="mb-6">
+				<CardHeader>
+					<div className="flex items-center justify-between">
+						<div className="flex items-center gap-3">
+							<Shield className="h-5 w-5" />
+							<div>
+								<CardTitle>
+									Панель администратора
+								</CardTitle>
+								<CardDescription>
+									Расширенная аналитика работы сотрудников с временной шкалой
+								</CardDescription>
+							</div>
+						</div>
+						<Button
+							variant="outline"
+							onClick={() => window.location.href = '/'}
+							className="flex items-center gap-2"
+						>
+							<Home className="h-4 w-4" />
+							Главная
+						</Button>
+					</div>
+				</CardHeader>
+			</Card>
 
-          <Tabs defaultValue="timeline" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="timeline">Временной разрез</TabsTrigger>
-              <TabsTrigger value="employees">Аналитика сотрудников</TabsTrigger>
-              <TabsTrigger value="tasks">Аналитика задач</TabsTrigger>
-              <TabsTrigger value="dashboard">Общая статистика</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="timeline">
-              <DailyTimeline />
-            </TabsContent>
-
-            <TabsContent value="employees">
-              <EmployeeAnalytics />
-            </TabsContent>
-
-            <TabsContent value="tasks">
-              <TaskAnalyticsNew />
-            </TabsContent>
-
-            <TabsContent value="dashboard">
-              <GeneralDashboard />
-            </TabsContent>
-          </Tabs>
-        </div>
-      </main>
-    </AuthGuard>
-  )
+			<EnhancedDashboardV2 />
+		</div>
+	)
 }

@@ -1,0 +1,17 @@
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <!-- Зеленый фон -->
+  <rect width="16" height="16" fill="#10B981"/>
+  
+  <!-- Черная рамка -->
+  <rect x="0" y="0" width="16" height="2" fill="#000"/>
+  <rect x="0" y="14" width="16" height="2" fill="#000"/>
+  <rect x="0" y="0" width="2" height="16" fill="#000"/>
+  <rect x="14" y="0" width="2" height="16" fill="#000"/>
+  
+  <!-- Упрощенная белая галочка -->
+  <rect x="4" y="8" width="2" height="2" fill="#fff"/>
+  <rect x="6" y="10" width="2" height="2" fill="#fff"/>
+  <rect x="8" y="8" width="2" height="2" fill="#fff"/>
+  <rect x="10" y="6" width="2" height="2" fill="#fff"/>
+  <rect x="12" y="4" width="2" height="2" fill="#fff"/>
+</svg> 

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -13,6 +13,13 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Eye, EyeOff, UserPlus } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { supabase } from "@/lib/supabase"
+
+interface Office {
+	id: number
+	name: string
+	description: string
+}
 
 interface RegisterFormProps {
 	onSwitchToLogin: () => void
@@ -24,10 +31,31 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 	const [confirmPassword, setConfirmPassword] = useState("")
 	const [fullName, setFullName] = useState("")
 	const [workSchedule, setWorkSchedule] = useState("")
+	const [officeId, setOfficeId] = useState("")
+	const [offices, setOffices] = useState<Office[]>([])
 	const [showPassword, setShowPassword] = useState(false)
 	const [loading, setLoading] = useState(false)
 	const { signUp } = useAuth()
 	const { toast } = useToast()
+
+	// Загружаем список офисов при монтировании компонента
+	useEffect(() => {
+		const fetchOffices = async () => {
+			try {
+				const { data, error } = await supabase
+					.from("offices")
+					.select("*")
+					.order("name")
+
+				if (error) throw error
+				setOffices(data || [])
+			} catch (error) {
+				console.error("Ошибка загрузки офисов:", error)
+			}
+		}
+
+		fetchOffices()
+	}, [])
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault()
@@ -45,6 +73,15 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 			toast({
 				title: "Ошибка",
 				description: "Выберите график работы",
+				variant: "destructive",
+			})
+			return
+		}
+
+		if (!officeId) {
+			toast({
+				title: "Ошибка",
+				description: "Выберите офис",
 				variant: "destructive",
 			})
 			return
@@ -70,7 +107,7 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 
 		setLoading(true)
 
-		const { error } = await signUp(email, password, fullName, workSchedule)
+		const { error } = await signUp(email, password, fullName, workSchedule, parseInt(officeId))
 
 		if (error) {
 			console.error("Registration error:", error)
@@ -98,7 +135,7 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 		} else {
 			toast({
 				title: "Регистрация успешна!",
-				description: "Добро пожаловать! Настройте свой профиль",
+				description: "Добро пожаловать! Профиль настроен",
 			})
 			// Не переключаемся на логин, поскольку пользователь должен быть автоматически залогинен
 		}
@@ -135,8 +172,29 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 								<SelectValue placeholder="Выберите график работы" />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="8+1">8 часов + 1 час обед</SelectItem>
-								<SelectItem value="12">12 часов</SelectItem>
+								<SelectItem value="5/2">5/2 - 9 часов (8 + 1 час обед)</SelectItem>
+								<SelectItem value="2/2">2/2 - 12 часов (11 + 1 час обед)</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="office">Офис</Label>
+						<Select value={officeId} onValueChange={setOfficeId} disabled={loading}>
+							<SelectTrigger className="border-2 border-black">
+								<SelectValue placeholder="Выберите ваш офис" />
+							</SelectTrigger>
+							<SelectContent>
+								{offices.map((office) => (
+									<SelectItem key={office.id} value={office.id.toString()}>
+										<div className="flex items-center gap-2">
+											<span className="font-semibold">{office.name}</span>
+											<span className="text-sm text-muted-foreground">
+												{office.description}
+											</span>
+										</div>
+									</SelectItem>
+								))}
 							</SelectContent>
 						</Select>
 					</div>

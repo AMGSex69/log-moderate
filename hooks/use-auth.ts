@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { useState, useEffect, createContext, useContext, useRef } from "react"
+import { useState, useEffect, createContext, useContext, useRef, useMemo } from "react"
 import type { User } from "@supabase/supabase-js"
 import { authService, type UserProfile } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -13,7 +13,7 @@ interface AuthContextType {
 	loading: boolean
 	error: string | null
 	signIn: (email: string, password: string) => Promise<{ error: any }>
-	signUp: (email: string, password: string, fullName: string, workSchedule?: string) => Promise<{ error: any }>
+	signUp: (email: string, password: string, fullName: string, workSchedule?: string, districtId?: number) => Promise<{ error: any }>
 	signOut: () => Promise<void>
 	refreshProfile: () => Promise<void>
 	updateProfile: (updates: Partial<UserProfile>) => Promise<{ error: any }>
@@ -131,8 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 						full_name: "Разработчик",
 						position: "Developer",
 						is_admin: true,
-						work_schedule: "8+1",
-						work_hours: 8,
+						work_schedule: "5/2",
+						work_hours: 9,
 						is_online: true,
 						created_at: new Date().toISOString(),
 						updated_at: new Date().toISOString()
@@ -248,11 +248,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		}
 	}
 
-	const handleSignUp = async (email: string, password: string, fullName: string, workSchedule?: string) => {
+	const handleSignUp = async (email: string, password: string, fullName: string, workSchedule?: string, districtId?: number) => {
 		setError(null)
 		setLoading(true)
 		try {
-			const { error } = await authService.signUp(email, password, fullName, workSchedule)
+			const { error } = await authService.signUp(email, password, fullName, workSchedule, districtId)
 			if (error) {
 				setError(error.message)
 			}
@@ -306,7 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		}
 	}
 
-	const contextValue = {
+	const contextValue = useMemo(() => ({
 		user,
 		profile,
 		loading,
@@ -316,7 +316,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		signOut: handleSignOut,
 		refreshProfile,
 		updateProfile: handleUpdateProfile,
-	}
+	}), [user, profile, loading, error])
 
 	return React.createElement(AuthContext.Provider, { value: contextValue }, children)
 }

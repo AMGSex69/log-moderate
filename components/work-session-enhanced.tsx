@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,7 +17,8 @@ import { supabase } from "@/lib/supabase"
 import { authService } from "@/lib/auth"
 import { useAuth } from "@/hooks/use-auth"
 import { useToast } from "@/hooks/use-toast"
-import { Clock, Play, Pause, LogOut, AlertTriangle, CheckCircle, Briefcase } from "lucide-react"
+import { Clock, Play, Pause, LogOut, AlertTriangle, CheckCircle, Users } from "lucide-react"
+import { format } from "date-fns"
 
 interface WorkSessionData {
 	id?: string
@@ -32,21 +33,13 @@ interface WorkSessionData {
 	isAutoClockOut: boolean
 }
 
-interface WorkingEmployee {
-	id: string
-	full_name: string
-	clock_in_time: string
-	expected_end_time: string | null
-	is_paused: boolean
-	current_task?: string
-	work_time_minutes: number
-}
-
 interface WorkSessionEnhancedProps {
-	onSessionChange: (isWorking: boolean) => void
+	onSessionChange: (isWorking: boolean, isPaused?: boolean) => void
+	activeTasks?: Array<{ id: number; taskTypeId: number; taskName: string }>
+	onForceStopAllTasks?: () => void
 }
 
-export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnhancedProps) {
+export default function WorkSessionEnhanced({ onSessionChange, activeTasks = [], onForceStopAllTasks }: WorkSessionEnhancedProps) {
 	const { user, profile } = useAuth()
 	const { toast } = useToast()
 
@@ -62,16 +55,15 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 		isAutoClockOut: false,
 	})
 
-	const [workingEmployees, setWorkingEmployees] = useState<WorkingEmployee[]>([])
 	const [loading, setLoading] = useState(true)
 	const [showEndDialog, setShowEndDialog] = useState(false)
+	const [showResumeDialog, setShowResumeDialog] = useState(false)
+	const [showActiveTasksWarning, setShowActiveTasksWarning] = useState(false)
 	const [currentTime, setCurrentTime] = useState(new Date())
 
 	// Refs для предотвращения повторных вызовов
 	const sessionLoadingRef = useRef(false)
-	const employeesLoadingRef = useRef(false)
 	const lastSessionLoad = useRef(0)
-	const lastEmployeesLoad = useRef(0)
 
 	// Обновляем время каждую секунду
 	useEffect(() => {
@@ -81,20 +73,26 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 		return () => clearInterval(interval)
 	}, [])
 
-	// Мемоизированная функция загрузки данных сессии
+	// ИСПРАВЛЕНО: Загружаем данные только при монтировании и изменении пользователя
+	useEffect(() => {
+		if (user) {
+			loadSessionData()
+		}
+	}, [user])
+
+	// Мемоизированная функция загрузки данных сессии - ИСПРАВЛЕНО: убираем циклические зависимости
 	const loadSessionData = useCallback(async () => {
 		if (!user || sessionLoadingRef.current) return
 
-		// Предотвращаем частые запросы (не чаще раза в 5 секунд)
+		// Предотвращаем частые запросы (не чаще раза в 30 секунд для автоматических обновлений)
 		const now = Date.now()
-		if (now - lastSessionLoad.current < 5000) return
+		if (now - lastSessionLoad.current < 30000) return
 
 		sessionLoadingRef.current = true
 		lastSessionLoad.current = now
 
 		try {
 			setLoading(true)
-			console.log("🔍 Загружаем данные сессии для пользователя:", user.id)
 
 			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
 			if (empError || !employeeId) {
@@ -102,33 +100,21 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 				return
 			}
 
-			console.log("✅ Employee ID найден:", employeeId)
-
 			const today = new Date().toISOString().split("T")[0]
-			console.log("📅 Ищем сессию на дату:", today)
 
 			const { data: session, error: sessionError } = await supabase
 				.from("work_sessions")
 				.select("*")
 				.eq("employee_id", employeeId)
 				.eq("date", today)
-				.single()
+				.maybeSingle()
 
 			if (sessionError && sessionError.code !== "PGRST116") {
 				console.error("❌ Ошибка загрузки сессии:", sessionError)
 				throw sessionError
 			}
 
-			console.log("📊 Данные сессии:", session)
-
 			if (session) {
-				console.log("🔍 Подробности сессии:", {
-					id: session.id,
-					clock_in_time: session.clock_in_time,
-					clock_out_time: session.clock_out_time,
-					is_paused: session.is_paused
-				})
-
 				const workHours = getWorkHours()
 				const expectedEnd = session.clock_in_time
 					? new Date(new Date(session.clock_in_time).getTime() + workHours * 60 * 60 * 1000)
@@ -147,19 +133,12 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 					isAutoClockOut: session.is_auto_clocked_out || false,
 				}
 
-				console.log("🔄 Устанавливаем новое состояние:", newSessionData)
 				setSessionData(newSessionData)
 
 				// Уведомляем родительский компонент о статусе работы
 				const isWorking = session.clock_in_time && !session.clock_out_time
-				console.log("🎯 Статус работы из loadSessionData:", {
-					clock_in_time: !!session.clock_in_time,
-					clock_out_time: !!session.clock_out_time,
-					isWorking: isWorking
-				})
-				onSessionChange(isWorking)
+				onSessionChange(isWorking, session.is_paused || false)
 			} else {
-				console.log("📝 Сессия не найдена, создаем пустую")
 				setSessionData({
 					clockInTime: null,
 					clockOutTime: null,
@@ -171,7 +150,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 					overtimeMinutes: 0,
 					isAutoClockOut: false,
 				})
-				onSessionChange(false)
+				onSessionChange(false, false)
 			}
 		} catch (error) {
 			console.error("💥 Критическая ошибка загрузки сессии:", error)
@@ -184,151 +163,81 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			setLoading(false)
 			sessionLoadingRef.current = false
 		}
-	}, [user, onSessionChange, toast])
+	}, [user, toast])
 
-	// Мемоизированная функция загрузки работающих сотрудников
-	const loadWorkingEmployees = useCallback(async () => {
-		if (employeesLoadingRef.current) return
+	// Функция для принудительного обновления данных (без ограничений по времени)
+	const forceLoadSessionData = useCallback(async () => {
+		if (!user || sessionLoadingRef.current) return
 
-		// Предотвращаем частые запросы (не чаще раза в 10 секунд)
-		const now = Date.now()
-		if (now - lastEmployeesLoad.current < 10000) return
-
-		employeesLoadingRef.current = true
-		lastEmployeesLoad.current = now
+		sessionLoadingRef.current = true
 
 		try {
-			console.log("👥 Загружаем работающих сотрудников...")
+			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
+			if (empError || !employeeId) return
 
 			const today = new Date().toISOString().split("T")[0]
 
-			// Упрощенный запрос - сначала получаем рабочие сессии
-			const { data: workingSessions, error: sessionsError } = await supabase
+			const { data: session, error: sessionError } = await supabase
 				.from("work_sessions")
-				.select("employee_id, clock_in_time, expected_end_time, is_paused, total_break_minutes")
+				.select("*")
+				.eq("employee_id", employeeId)
 				.eq("date", today)
-				.not("clock_in_time", "is", null)
-				.is("clock_out_time", null)
+				.maybeSingle()
 
-			if (sessionsError) {
-				console.error("❌ Ошибка загрузки рабочих сессий:", sessionsError)
+			if (sessionError && sessionError.code !== "PGRST116") {
+				console.error("❌ Ошибка принудительной загрузки сессии:", sessionError)
 				return
 			}
 
-			console.log("💼 Найдено работающих сессий:", workingSessions?.length || 0)
+			if (session) {
+				const workHours = getWorkHours()
+				const expectedEnd = session.clock_in_time
+					? new Date(new Date(session.clock_in_time).getTime() + workHours * 60 * 60 * 1000)
+					: null
 
-			if (!workingSessions || workingSessions.length === 0) {
-				setWorkingEmployees([])
-				return
-			}
-
-			// Получаем информацию о сотрудниках отдельным запросом
-			const employeeIds = workingSessions.map((session) => session.employee_id)
-			const { data: employees, error: employeesError } = await supabase
-				.from("employees")
-				.select("id, full_name")
-				.in("id", employeeIds)
-
-			if (employeesError) {
-				console.error("❌ Ошибка загрузки сотрудников:", employeesError)
-				return
-			}
-
-			// Получаем активные задачи отдельным запросом
-			const { data: activeTasks, error: tasksError } = await supabase
-				.from("active_sessions")
-				.select("employee_id, task_type_id")
-				.in("employee_id", employeeIds)
-
-			if (tasksError) {
-				console.error("❌ Ошибка загрузки активных задач:", tasksError)
-			}
-
-			// Получаем типы задач если есть активные задачи
-			let taskTypes: any[] = []
-			if (activeTasks && activeTasks.length > 0) {
-				const taskTypeIds = activeTasks.map((task) => task.task_type_id)
-				const { data: types, error: typesError } = await supabase
-					.from("task_types")
-					.select("id, name")
-					.in("id", taskTypeIds)
-
-				if (!typesError) {
-					taskTypes = types || []
+				const newSessionData = {
+					id: session.id,
+					clockInTime: session.clock_in_time ? new Date(session.clock_in_time) : null,
+					clockOutTime: session.clock_out_time ? new Date(session.clock_out_time) : null,
+					expectedEndTime: expectedEnd,
+					isPaused: session.is_paused || false,
+					pauseStartTime: session.pause_start_time ? new Date(session.pause_start_time) : null,
+					totalWorkMinutes: session.total_work_minutes || 0,
+					totalBreakMinutes: session.total_break_minutes || 0,
+					overtimeMinutes: session.overtime_minutes || 0,
+					isAutoClockOut: session.is_auto_clocked_out || false,
 				}
+
+				setSessionData(newSessionData)
+				onSessionChange(session.clock_in_time && !session.clock_out_time, session.is_paused || false)
+			} else {
+				setSessionData({
+					clockInTime: null,
+					clockOutTime: null,
+					expectedEndTime: null,
+					isPaused: false,
+					pauseStartTime: null,
+					totalWorkMinutes: 0,
+					totalBreakMinutes: 0,
+					overtimeMinutes: 0,
+					isAutoClockOut: false,
+				})
+				onSessionChange(false, false)
 			}
-
-			// Создаем карты для быстрого поиска
-			const employeesMap = new Map()
-			employees?.forEach((emp) => {
-				employeesMap.set(emp.id, emp.full_name)
-			})
-
-			const taskTypesMap = new Map()
-			taskTypes.forEach((type) => {
-				taskTypesMap.set(type.id, type.name)
-			})
-
-			const employeeTasksMap = new Map()
-			activeTasks?.forEach((task) => {
-				const taskName = taskTypesMap.get(task.task_type_id)
-				if (taskName) {
-					employeeTasksMap.set(task.employee_id, taskName)
-				}
-			})
-
-			// Формируем список работающих сотрудников
-			const workingList: WorkingEmployee[] = workingSessions.map((session) => {
-				const clockInTime = new Date(session.clock_in_time)
-				const workTimeMinutes = Math.floor((currentTime.getTime() - clockInTime.getTime()) / 60000)
-				const effectiveWorkTime = Math.max(0, workTimeMinutes - (session.total_break_minutes || 0))
-
-				return {
-					id: session.employee_id,
-					full_name: employeesMap.get(session.employee_id) || "Неизвестный сотрудник",
-					clock_in_time: session.clock_in_time,
-					expected_end_time: session.expected_end_time,
-					is_paused: session.is_paused,
-					current_task: employeeTasksMap.get(session.employee_id),
-					work_time_minutes: effectiveWorkTime,
-				}
-			})
-
-			console.log("✅ Обработано работающих сотрудников:", workingList.length)
-			setWorkingEmployees(workingList)
 		} catch (error) {
-			console.error("💥 Критическая ошибка загрузки работающих сотрудников:", error)
-			setWorkingEmployees([])
+			console.error("💥 Ошибка принудительной загрузки сессии:", error)
 		} finally {
-			employeesLoadingRef.current = false
+			sessionLoadingRef.current = false
 		}
-	}, [currentTime])
-
-	// Загружаем данные при монтировании и изменении пользователя
-	useEffect(() => {
-		if (user) {
-			loadSessionData()
-		}
-	}, [user, loadSessionData])
-
-	// ОТКЛЮЧЕНО: Загружаем работающих сотрудников с интервалом
-	useEffect(() => {
-		if (user) {
-			loadWorkingEmployees()
-
-			// ОТКЛЮЧЕНО: Убираем автоматическое обновление списка работающих сотрудников
-			// const interval = setInterval(loadWorkingEmployees, 30000)
-			// return () => clearInterval(interval)
-		}
-	}, [user, loadWorkingEmployees])
+	}, [user, onSessionChange, toast])
 
 	const getWorkHours = () => {
 		if (!profile?.work_schedule) return 9
 		return profile.work_schedule === "12" ? 12 : 9 // 8+1 = 9 часов
 	}
 
-	const handleClockIn = async () => {
-		console.log("🎯 handleClockIn: Начало функции")
+	const handleClockIn = async (confirmed = false) => {
+		console.log("🎯 handleClockIn: Начало функции, confirmed =", confirmed)
 		console.log("🎯 handleClockIn: user =", !!user, "profile =", !!profile)
 
 		if (!user || !profile) {
@@ -347,9 +256,6 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			}
 
 			const now = new Date()
-			const workHours = getWorkHours()
-			const expectedEnd = new Date(now.getTime() + workHours * 60 * 60 * 1000)
-			console.log("⏰ handleClockIn: workHours =", workHours, "expectedEnd =", expectedEnd)
 
 			// Сначала проверяем, есть ли уже сессия на сегодня
 			console.log("🔍 handleClockIn: Проверяем существующую сессию")
@@ -358,9 +264,20 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 				.select("id, clock_out_time, clock_in_time")
 				.eq("employee_id", employeeId)
 				.eq("date", now.toISOString().split("T")[0])
-				.single()
+				.maybeSingle()
 
 			console.log("📊 handleClockIn: existingSession =", existingSession, "checkError =", checkError)
+
+			// Если есть завершенная сессия и нет подтверждения - показываем диалог
+			if (existingSession?.clock_out_time && !confirmed) {
+				console.log("🔄 handleClockIn: Показываем диалог подтверждения возобновления")
+				setShowResumeDialog(true)
+				return
+			}
+
+			const workHours = getWorkHours()
+			const expectedEnd = new Date(now.getTime() + workHours * 60 * 60 * 1000)
+			console.log("⏰ handleClockIn: workHours =", workHours, "expectedEnd =", expectedEnd)
 
 			let sessionData
 			if (existingSession) {
@@ -375,24 +292,32 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 				const updateData = {
 					clock_in_time: now.toISOString(),
 					clock_out_time: null, // Сбрасываем время окончания
+					start_time: now.toISOString(), // Для синхронизации с триггером
+					end_time: null, // ВАЖНО: Сбрасываем end_time чтобы триггер не перезаписал clock_out_time
 					expected_end_time: expectedEnd.toISOString(),
 					is_paused: false,
 					pause_start_time: null,
-					total_work_minutes: 0,
-					total_break_minutes: 0,
-					overtime_minutes: 0,
+					// При возобновлении НЕ сбрасываем статистику
+					...(existingSession.clock_out_time ? {} : {
+						total_work_minutes: 0,
+						total_break_minutes: 0,
+						overtime_minutes: 0,
+					}),
 					is_auto_clocked_out: false,
 					updated_at: now.toISOString(),
 				}
 
 				console.log("📝 handleClockIn: Данные для обновления:", updateData)
 
+				console.log("🔍 handleClockIn: Выполняем UPDATE запрос...")
 				const { data, error } = await supabase
 					.from("work_sessions")
 					.update(updateData)
 					.eq("id", existingSession.id)
 					.select()
 					.single()
+
+				console.log("📊 handleClockIn: Результат UPDATE:", { data, error })
 
 				if (error) {
 					console.error("❌ handleClockIn: Ошибка обновления сессии", error)
@@ -435,9 +360,9 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 				expectedEndTime: expectedEnd,
 				isPaused: false,
 				pauseStartTime: null,
-				totalWorkMinutes: 0,
-				totalBreakMinutes: 0,
-				overtimeMinutes: 0,
+				totalWorkMinutes: sessionData.total_work_minutes || 0,
+				totalBreakMinutes: sessionData.total_break_minutes || 0,
+				overtimeMinutes: sessionData.overtime_minutes || 0,
 				isAutoClockOut: false,
 			}
 
@@ -445,27 +370,29 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			console.log("✅ handleClockIn: Локальное состояние обновлено", newSessionData)
 
 			// Уведомляем родительский компонент НЕМЕДЛЕННО
-			console.log("🔄 handleClockIn: Уведомляем о смене статуса работы")
-			onSessionChange(true)
+			// console.log("🔄 handleClockIn: Уведомляем о смене статуса работы")
+			onSessionChange(true, false)
 
-			// ОТКЛЮЧЕНО: Убираем обновление статуса онлайн
-			// console.log("🔄 handleClockIn: Обновляем статус онлайн")
-			// if (user) {
-			//	await authService.updateOnlineStatus(user.id, true)
-			// }
+			// Закрываем диалог подтверждения если он был открыт
+			setShowResumeDialog(false)
 
 			// Сразу перезагружаем данные чтобы синхронизироваться с БД
-			console.log("🔄 handleClockIn: Перезагружаем данные немедленно")
+			// ИСПРАВЛЕНО: Используем принудительное обновление только после изменений в БД
 			setTimeout(() => {
-				loadSessionData().catch(console.error)
-				loadWorkingEmployees().catch(console.error)
-			}, 500) // Уменьшили с 2000 до 500мс
+				forceLoadSessionData().catch(console.error)
+			}, 500) // Уменьшили задержку
 
-			console.log("✅ handleClockIn: Всё успешно!")
+			// console.log("✅ handleClockIn: Всё успешно!")
+			const isResuming = existingSession?.clock_out_time
 			toast({
-				title: "🎯 Рабочий день начат!",
-				description: `Ожидаемое окончание: ${expectedEnd.toLocaleTimeString()}`,
+				title: isResuming ? "🔄 Рабочий день возобновлен!" : "🎯 Рабочий день начат!",
+				description: isResuming
+					? "Статистика выполненных задач сохранена"
+					: `Ожидаемое окончание: ${expectedEnd.toLocaleTimeString()}`,
 			})
+
+			// Уведомляем родительский компонент об изменении состояния паузы
+			onSessionChange(true, false)
 		} catch (error) {
 			console.error("💥 handleClockIn: Критическая ошибка:", error)
 			toast({
@@ -473,6 +400,7 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 				description: "Не удалось начать рабочий день",
 				variant: "destructive" as const,
 			})
+			setShowResumeDialog(false)
 		}
 	}
 
@@ -504,13 +432,15 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 
 			if (error) throw error
 
-			await loadSessionData()
-			await loadWorkingEmployees() // Обновляем список работающих
+			await forceLoadSessionData()
 
 			toast({
 				title: newPausedState ? "⏸️ Работа приостановлена" : "▶️ Работа возобновлена",
 				description: newPausedState ? "Время паузы учитывается отдельно" : "Продолжаем работу",
 			})
+
+			// Уведомляем родительский компонент об изменении состояния паузы
+			onSessionChange(true, newPausedState)
 		} catch (error) {
 			console.error("Ошибка переключения паузы:", error)
 			toast({
@@ -522,6 +452,19 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 	}
 
 	const handleEndDay = async () => {
+		if (!sessionData.id) return
+
+		// ПРОВЕРКА АКТИВНЫХ ЗАДАЧ
+		if (activeTasks && activeTasks.length > 0) {
+			setShowActiveTasksWarning(true)
+			return
+		}
+
+		await performEndDay()
+	}
+
+	// Выделяем логику завершения дня в отдельную функцию
+	const performEndDay = async () => {
 		if (!sessionData.id) return
 
 		try {
@@ -566,9 +509,9 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 			//	await authService.updateOnlineStatus(user.id, false)
 			// }
 
-			await loadSessionData()
-			await loadWorkingEmployees() // Обновляем список работающих
+			await forceLoadSessionData()
 			setShowEndDialog(false)
+			setShowActiveTasksWarning(false) // Закрываем диалог предупреждения
 
 			toast({
 				title: "🏁 Рабочий день завершен!",
@@ -582,6 +525,18 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 				variant: "destructive" as const,
 			})
 		}
+	}
+
+	// Обработчик принудительного завершения с остановкой задач
+	const handleForceEndWithStopTasks = async () => {
+		if (onForceStopAllTasks) {
+			onForceStopAllTasks() // Останавливаем все активные задачи
+		}
+
+		// Ждем немного чтобы задачи успели остановиться
+		setTimeout(() => {
+			performEndDay()
+		}, 500)
 	}
 
 	const formatTime = (date: Date) => {
@@ -620,12 +575,37 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 		return Math.max(0, currentWorkMinutes - expectedWorkMinutes)
 	}
 
-	const isWorking = sessionData.clockInTime && !sessionData.clockOutTime
-	console.log("🎯 isWorking calculation:", {
-		clockInTime: !!sessionData.clockInTime,
-		clockOutTime: !!sessionData.clockOutTime,
-		isWorking: isWorking
-	})
+	// Функция для получения текущего времени перерывов в реальном времени
+	const getCurrentBreakTime = () => {
+		let totalBreakMinutes = sessionData.totalBreakMinutes
+
+		// Если сейчас на паузе, добавляем время текущей паузы
+		if (sessionData.isPaused && sessionData.pauseStartTime) {
+			const currentPauseDuration = Math.floor((currentTime.getTime() - sessionData.pauseStartTime.getTime()) / 60000)
+			totalBreakMinutes += currentPauseDuration
+		}
+
+		return totalBreakMinutes
+	}
+
+	// Функция для получения текущей переработки в реальном времени
+	const getCurrentOvertimeMinutes = () => {
+		const currentWorkMinutes = getCurrentWorkTime()
+		const expectedWorkMinutes = getWorkHours() * 60
+		return Math.max(0, currentWorkMinutes - expectedWorkMinutes)
+	}
+
+	// ИСПРАВЛЕНО: Мемоизируем вычисление isWorking чтобы избежать бесконечного рендеринга
+	const isWorking = useMemo(() => {
+		const working = !!(sessionData.clockInTime && !sessionData.clockOutTime)
+		// Убираем избыточное логирование, которое может вызывать частые обновления
+		// console.log("🎯 isWorking calculation:", {
+		//	clockInTime: !!sessionData.clockInTime,
+		//	clockOutTime: !!sessionData.clockOutTime,
+		//	isWorking: working
+		// })
+		return working
+	}, [sessionData.clockInTime, sessionData.clockOutTime])
 
 	if (loading) {
 		return (
@@ -640,162 +620,205 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 
 	return (
 		<div className="space-y-4">
-			{/* Основная панель рабочей смены */}
-			<PixelCard
-				className={`${isWorking ? (sessionData.isPaused ? "border-yellow-400" : "border-green-400") : "border-gray-300"} border-2`}
-			>
+			{/* Основная панель управления */}
+			<PixelCard>
 				<div className="p-4">
-					<div className="flex items-center justify-between mb-4">
-						<div className="flex items-center gap-2">
-							<Clock className="h-5 w-5" />
-							<span className="font-bold">Рабочая смена</span>
+					<div className="flex items-center gap-2 mb-4">
+						<div className="flex items-center gap-3">
+							<div className={`w-3 h-3 rounded-full ${sessionData.isAutoClockOut ? "bg-red-500" : sessionData.clockInTime ? "bg-green-500" : "bg-gray-500"}`} />
+							<div>
+								<div className="font-bold text-lg">
+									{sessionData.clockInTime ? (sessionData.clockOutTime ? "Рабочий день завершен" : "На работе") : "Не на работе"}
+								</div>
+								<div className="text-sm text-muted-foreground">
+									{sessionData.clockInTime
+										? sessionData.clockOutTime
+											? `Работал ${formatDuration(sessionData.totalWorkMinutes)}`
+											: `В работе ${formatDuration(getCurrentWorkTime())}`
+										: "Время начать работу"}
+								</div>
+							</div>
 						</div>
-						{isWorking && (
-							<Badge variant={sessionData.isPaused ? "secondary" : "default"}>
-								{sessionData.isPaused ? "На паузе" : "Работаю"}
-							</Badge>
-						)}
 					</div>
 
-					{!isWorking ? (
-						<div className="text-center py-4">
-							<div className="text-4xl mb-2">🏠</div>
-							<div className="text-muted-foreground mb-4">Рабочий день не начат</div>
-							<PixelButton onClick={handleClockIn} className="w-full">
-								<Play className="h-4 w-4 mr-2" />
-								Начать рабочий день
-							</PixelButton>
-						</div>
-					) : (
+					{sessionData.clockInTime && sessionData.clockOutTime && (
 						<div className="space-y-4">
-							{/* Информация о времени */}
-							<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-								<div className="space-y-2">
-									<div className="text-sm text-muted-foreground">Время начала</div>
-									<div className="text-lg font-mono">{sessionData.clockInTime ? formatTime(sessionData.clockInTime) : "—"}</div>
-								</div>
-								<div className="space-y-2">
-									<div className="text-sm text-muted-foreground">Ожидаемое окончание</div>
-									<div className="text-lg font-mono">
-										{sessionData.expectedEndTime ? formatTime(sessionData.expectedEndTime) : "—"}
-									</div>
-								</div>
-								<div className="space-y-2">
-									<div className="text-sm text-muted-foreground">Отработано</div>
-									<div className="text-lg font-mono">{formatDuration(getCurrentWorkTime())}</div>
-								</div>
-								<div className="space-y-2">
-									<div className="text-sm text-muted-foreground">Переработки</div>
-									<div className={`text-lg font-mono ${getOvertimeMinutes() > 0 ? "text-red-600" : ""}`}>
-										{formatDuration(getOvertimeMinutes())}
-									</div>
+							<div className="text-center py-3 bg-green-50 rounded-lg border border-green-200">
+								<div className="text-green-800 font-semibold">Рабочий день завершен! 🎉</div>
+								<div className="text-green-600 text-sm">
+									Отработано: {formatDuration(sessionData.totalWorkMinutes)} •{" "}
+									{sessionData.overtimeMinutes > 0 ? `Переработка: ${formatDuration(sessionData.overtimeMinutes)}` : "В норме"}
 								</div>
 							</div>
 
-							{sessionData.clockOutTime && (
-								<div className="mb-4 p-3 bg-muted rounded-lg">
-									<div className="text-sm text-muted-foreground mb-1">Рабочий день завершен</div>
-									<div className="text-lg font-mono">{formatTime(sessionData.clockOutTime)}</div>
+							<div className="text-center">
+								<PixelButton onClick={() => handleClockIn(false)} disabled={loading} className="w-full mb-2" variant="primary">
+									🔄 Возобновить рабочий день
+								</PixelButton>
+								<p className="text-sm text-muted-foreground">
+									При возобновлении статистика выполненных задач сохранится
+								</p>
+							</div>
+						</div>
+					)}
+
+					{!sessionData.clockInTime && (
+						<div className="text-center py-8">
+							<div className="text-4xl mb-3">🏢</div>
+							<PixelButton onClick={() => handleClockIn(false)} disabled={loading} className="w-full mb-2">
+								{loading ? "Отмечаемся..." : "Начать рабочий день"}
+							</PixelButton>
+							<p className="text-sm text-muted-foreground">
+								График: {profile?.work_schedule || "8+1"} • {getWorkHours()} ч/день
+							</p>
+						</div>
+					)}
+
+					{sessionData.clockInTime && !sessionData.clockOutTime && (
+						<div className="space-y-4">
+							<div className="grid grid-cols-2 gap-4 text-center">
+								<div className="p-3 bg-blue-50 rounded-lg">
+									<div className="text-2xl font-bold text-blue-600">{formatTime(new Date(sessionData.clockInTime))}</div>
+									<div className="text-xs text-blue-800">Начало</div>
+								</div>
+								<div className="p-3 bg-purple-50 rounded-lg">
+									<div className="text-2xl font-bold text-purple-600">
+										{sessionData.expectedEndTime ? formatTime(new Date(sessionData.expectedEndTime)) : "—"}
+									</div>
+									<div className="text-xs text-purple-800">Планируемый конец</div>
+								</div>
+							</div>
+
+							{sessionData.isPaused && (
+								<div className="text-center py-3 bg-yellow-50 rounded-lg border border-yellow-200">
+									<div className="text-yellow-800 font-semibold">⏸️ Пауза</div>
+									<div className="text-yellow-600 text-sm">
+										{sessionData.pauseStartTime && (
+											<>С {formatTime(new Date(sessionData.pauseStartTime))} • {formatDuration(sessionData.totalBreakMinutes)} перерыв</>
+										)}
+									</div>
 								</div>
 							)}
 
-							{/* Центральный таймер */}
-							<PixelCard className="bg-gradient-to-r from-blue-50 to-purple-50">
-								<div className="p-4 text-center">
-									<div className="text-3xl font-bold font-mono mb-1">{formatDuration(getCurrentWorkTime())}</div>
-									<div className="text-sm text-muted-foreground">
-										{sessionData.isPaused ? "работа приостановлена" : "эффективно отработано"}
-									</div>
-									{getOvertimeMinutes() > 0 && (
-										<div className="text-sm text-orange-600 mt-1">
-											⚠️ Переработка: {formatDuration(getOvertimeMinutes())}
-										</div>
-									)}
-								</div>
-							</PixelCard>
+							<div className="flex gap-2">
+								{!sessionData.isPaused ? (
+									<button
+										onClick={handleTogglePause}
+										className="
+											flex-1 font-mono font-black text-black uppercase tracking-wider text-sm
+											bg-yellow-300 hover:bg-yellow-400 
+											border-4 border-black rounded-none
+											shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+											hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+											hover:translate-x-[2px] hover:translate-y-[2px]
+											transition-all duration-100
+											p-3
+										"
+									>
+										⏸️ ПАУЗА
+									</button>
+								) : (
+									<button
+										onClick={handleTogglePause}
+										className="
+											flex-1 font-mono font-black text-white uppercase tracking-wider text-sm
+											bg-green-500 hover:bg-green-600 
+											border-4 border-black rounded-none
+											shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+											hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+											hover:translate-x-[2px] hover:translate-y-[2px]
+											transition-all duration-100
+											p-3
+										"
+									>
+										▶️ ПРОДОЛЖИТЬ
+									</button>
+								)}
 
-							{/* Кнопки управления */}
-							<div className="space-y-2">
-								<PixelButton
-									onClick={handleTogglePause}
-									variant={sessionData.isPaused ? "success" : "secondary"}
-									className="w-full"
+								<button
+									onClick={() => setShowEndDialog(true)}
+									className="
+										flex-1 font-mono font-black text-white uppercase tracking-wider text-sm
+										bg-red-500 hover:bg-red-600 
+										border-4 border-black rounded-none
+										shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+										hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+										hover:translate-x-[2px] hover:translate-y-[2px]
+										transition-all duration-100
+										p-3
+									"
 								>
-									{sessionData.isPaused ? (
-										<>
-											<Play className="h-4 w-4 mr-2" />
-											Продолжить работу
-										</>
-									) : (
-										<>
-											<Pause className="h-4 w-4 mr-2" />
-											Поставить на паузу
-										</>
-									)}
-								</PixelButton>
+									🏁 ЗАВЕРШИТЬ
+								</button>
+							</div>
 
-								<PixelButton onClick={() => setShowEndDialog(true)} variant="danger" className="w-full">
-									<LogOut className="h-4 w-4 mr-2" />
-									Завершить день
-								</PixelButton>
+							{/* Статистика */}
+							<div className="grid grid-cols-3 gap-2 text-xs">
+								<div className="text-center p-2 bg-gray-50 rounded">
+									<div className="font-bold">{formatDuration(getCurrentWorkTime())}</div>
+									<div className="text-muted-foreground">Работы</div>
+								</div>
+								<div className="text-center p-2 bg-gray-50 rounded">
+									<div className="font-bold">{formatDuration(getCurrentBreakTime())}</div>
+									<div className="text-muted-foreground">Перерыв</div>
+								</div>
+								<div className="text-center p-2 bg-gray-50 rounded">
+									<div className="font-bold text-green-600">
+										{getCurrentOvertimeMinutes() > 0 ? `+${formatDuration(getCurrentOvertimeMinutes())}` : "В норме"}
+									</div>
+									<div className="text-muted-foreground">Переработка</div>
+								</div>
 							</div>
 						</div>
 					)}
 				</div>
 			</PixelCard>
 
-			{/* Панель работающих сотрудников */}
-			<PixelCard>
-				<div className="p-4">
-					<div className="flex items-center gap-2 mb-3">
-						<Briefcase className="h-5 w-5" />
-						<span className="font-bold">Сейчас работают</span>
-						<Badge variant="outline">{workingEmployees.length}</Badge>
+			{/* Диалог подтверждения возобновления */}
+			<Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<Clock className="h-5 w-5 text-blue-500" />
+							Возобновить рабочий день?
+						</DialogTitle>
+						<DialogDescription>
+							Вы уверены, что хотите возобновить рабочий день? При возобновлении вся статистика выполненных задач сохранится.
+						</DialogDescription>
+					</DialogHeader>
+
+					<div className="space-y-4">
+						{sessionData.clockOutTime && (
+							<div className="p-3 bg-blue-50 border border-blue-200 rounded">
+								<div className="text-sm text-blue-800">
+									<div className="font-semibold">Статистика предыдущей сессии:</div>
+									<div>• Отработано: {formatDuration(sessionData.totalWorkMinutes)}</div>
+									<div>• Перерывы: {formatDuration(sessionData.totalBreakMinutes)}</div>
+									{sessionData.overtimeMinutes > 0 && (
+										<div>• Переработка: {formatDuration(sessionData.overtimeMinutes)}</div>
+									)}
+								</div>
+							</div>
+						)}
+
+						<div className="p-3 bg-green-50 border border-green-200 rounded">
+							<div className="text-sm text-green-800">
+								✅ Вся статистика будет сохранена при возобновлении
+							</div>
+						</div>
 					</div>
 
-					{workingEmployees.length === 0 ? (
-						<div className="text-center py-4 text-muted-foreground">
-							<div className="text-2xl mb-2">💤</div>
-							<div className="text-sm">Никто не работает</div>
-						</div>
-					) : (
-						<div className="space-y-2 max-h-40 overflow-y-auto">
-							{workingEmployees.map((employee) => (
-								<div key={employee.id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-									<div className="flex items-center gap-2">
-										<div className={`w-2 h-2 rounded-full ${employee.is_paused ? "bg-yellow-500" : "bg-green-500"}`} />
-										<div>
-											<div className="font-medium text-sm">{employee.full_name}</div>
-											{employee.current_task && (
-												<div className="text-xs text-muted-foreground">{employee.current_task}</div>
-											)}
-											<div className="text-xs text-muted-foreground">
-												Работает: {formatDuration(employee.work_time_minutes)}
-											</div>
-										</div>
-									</div>
-									<div className="text-xs text-muted-foreground text-right">
-										<div>
-											Начал:{" "}
-											{new Date(employee.clock_in_time).toLocaleTimeString("ru-RU", {
-												hour: "2-digit",
-												minute: "2-digit",
-											})}
-										</div>
-										<div>
-											До:{" "}
-											{employee.expected_end_time ? new Date(employee.expected_end_time).toLocaleTimeString("ru-RU", {
-												hour: "2-digit",
-												minute: "2-digit",
-											}) : "—"}
-										</div>
-									</div>
-								</div>
-							))}
-						</div>
-					)}
-				</div>
-			</PixelCard>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setShowResumeDialog(false)}>
+							Отмена
+						</Button>
+						<Button onClick={() => handleClockIn(true)} className="bg-blue-600 hover:bg-blue-700">
+							<Clock className="h-4 w-4 mr-2" />
+							Да, возобновить
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			{/* Диалог завершения дня */}
 			<Dialog open={showEndDialog} onOpenChange={setShowEndDialog}>
@@ -816,15 +839,15 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 							</div>
 							<div>
 								<div className="text-muted-foreground">Перерывы</div>
-								<div className="font-bold">{formatDuration(sessionData.totalBreakMinutes)}</div>
+								<div className="font-bold">{formatDuration(getCurrentBreakTime())}</div>
 							</div>
 						</div>
 
-						{getOvertimeMinutes() > 0 && (
+						{getCurrentOvertimeMinutes() > 0 && (
 							<div className="p-3 bg-orange-50 border border-orange-200 rounded">
 								<div className="flex items-center gap-2 text-orange-700">
 									<AlertTriangle className="h-4 w-4" />
-									<span className="font-medium">Переработка: {formatDuration(getOvertimeMinutes())}</span>
+									<span className="font-medium">Переработка: {formatDuration(getCurrentOvertimeMinutes())}</span>
 								</div>
 							</div>
 						)}
@@ -837,6 +860,66 @@ export default function WorkSessionEnhanced({ onSessionChange }: WorkSessionEnha
 						<Button onClick={handleEndDay} className="bg-red-600 hover:bg-red-700">
 							<CheckCircle className="h-4 w-4 mr-2" />
 							Завершить день
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Диалог предупреждения об активных задачах */}
+			<Dialog open={showActiveTasksWarning} onOpenChange={setShowActiveTasksWarning}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<AlertTriangle className="h-5 w-5 text-red-500" />
+							Внимание! Активные задачи
+						</DialogTitle>
+						<DialogDescription>
+							У вас есть активные задачи. Завершите их или прогресс будет утерян.
+						</DialogDescription>
+					</DialogHeader>
+
+					<div className="space-y-4">
+						{/* Список активных задач */}
+						<div className="p-4 bg-red-50 border border-red-200 rounded">
+							<div className="font-medium text-red-800 mb-2">Активные задачи ({activeTasks.length}):</div>
+							<div className="space-y-1">
+								{activeTasks.map((task) => (
+									<div key={task.taskTypeId} className="text-sm text-red-700">
+										• {task.taskName}
+									</div>
+								))}
+							</div>
+						</div>
+
+						<div className="p-3 bg-yellow-50 border border-yellow-200 rounded">
+							<div className="text-sm text-yellow-800">
+								⚠️ <strong>Важно:</strong> Если завершить рабочий день с активными задачами,
+								весь их прогресс будет потерян без возможности восстановления.
+							</div>
+						</div>
+
+						<div className="p-3 bg-blue-50 border border-blue-200 rounded">
+							<div className="text-sm text-blue-800">
+								💡 <strong>Рекомендация:</strong> Сначала завершите все активные задачи,
+								а затем завершите рабочий день.
+							</div>
+						</div>
+					</div>
+
+					<DialogFooter className="flex-col sm:flex-row gap-2">
+						<Button
+							variant="outline"
+							onClick={() => setShowActiveTasksWarning(false)}
+							className="w-full sm:w-auto"
+						>
+							Отмена
+						</Button>
+						<Button
+							onClick={handleForceEndWithStopTasks}
+							className="bg-red-600 hover:bg-red-700 w-full sm:w-auto"
+						>
+							<AlertTriangle className="h-4 w-4 mr-2" />
+							Завершить и удалить прогресс
 						</Button>
 					</DialogFooter>
 				</DialogContent>

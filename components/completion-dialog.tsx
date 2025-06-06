@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
-import { CheckCircle, Clock, Hash } from "lucide-react"
+import { CheckCircle, Clock, Hash, Plus, Minus } from "lucide-react"
 
 interface CompletionDialogProps {
 	isOpen: boolean
@@ -24,6 +24,7 @@ interface CompletionDialogProps {
 	taskName: string
 	timeSpent: string
 	taskId?: number
+	initialUnits?: number
 }
 
 export default function CompletionDialog({
@@ -33,11 +34,19 @@ export default function CompletionDialog({
 	taskName,
 	timeSpent,
 	taskId,
+	initialUnits = 1,
 }: CompletionDialogProps) {
 	const [units, setUnits] = useState("")
 	const [notes, setNotes] = useState("")
 	const [loading, setLoading] = useState(false)
 	const [measurementUnit, setMeasurementUnit] = useState("единиц")
+
+	useEffect(() => {
+		if (isOpen) {
+			const startingUnits = (initialUnits && initialUnits > 0) ? initialUnits : 1
+			setUnits(startingUnits.toString())
+		}
+	}, [isOpen, initialUnits])
 
 	useEffect(() => {
 		if (isOpen && taskId) {
@@ -102,6 +111,18 @@ export default function CompletionDialog({
 		onClose()
 	}
 
+	const incrementUnits = () => {
+		const currentUnits = parseInt(units) || 0
+		setUnits((currentUnits + 1).toString())
+	}
+
+	const decrementUnits = () => {
+		const currentUnits = parseInt(units) || 0
+		if (currentUnits > 1) {
+			setUnits((currentUnits - 1).toString())
+		}
+	}
+
 	const getUnitLabel = () => {
 		switch (measurementUnit?.toLowerCase()) {
 			case "штука":
@@ -131,7 +152,7 @@ export default function CompletionDialog({
 						Завершение задачи
 					</DialogTitle>
 					<DialogDescription>
-						Укажите количество выполненных единиц и добавьте заметки при необходимости
+						Подтвердите количество выполненных единиц и добавьте заметки при необходимости
 					</DialogDescription>
 				</DialogHeader>
 
@@ -145,6 +166,11 @@ export default function CompletionDialog({
 							</Badge>
 						</div>
 						<div className="text-sm text-muted-foreground">Время выполнения: {timeSpent}</div>
+						{initialUnits && initialUnits > 0 && (
+							<div className="text-sm text-green-600 mt-1">
+								📝 Указано в процессе: {initialUnits} {getUnitLabel()}
+							</div>
+						)}
 					</div>
 
 					<div className="space-y-2">
@@ -152,17 +178,49 @@ export default function CompletionDialog({
 							{getUnitIcon()}
 							Количество {getUnitLabel()} *
 						</Label>
-						<Input
-							id="units"
-							type="number"
-							min="1"
-							value={units}
-							onChange={(e) => setUnits(e.target.value)}
-							placeholder={`Введите количество ${getUnitLabel()}`}
-							className="text-center text-lg font-bold"
-							autoFocus
-						/>
-						<div className="text-xs text-muted-foreground text-center">Единица измерения: {measurementUnit}</div>
+
+						<div className="flex items-center gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={decrementUnits}
+								disabled={parseInt(units) <= 1}
+								className="h-10 w-10 p-0"
+							>
+								<Minus className="h-4 w-4" />
+							</Button>
+
+							<div className="flex-1">
+								<Input
+									id="units"
+									type="number"
+									min="1"
+									value={units}
+									onChange={(e) => setUnits(e.target.value)}
+									placeholder={`Введите количество ${getUnitLabel()}`}
+									className="text-center text-lg font-bold"
+									autoFocus
+								/>
+							</div>
+
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={incrementUnits}
+								className="h-10 w-10 p-0"
+							>
+								<Plus className="h-4 w-4" />
+							</Button>
+						</div>
+
+						<div className="text-xs text-muted-foreground text-center">
+							Единица измерения: {measurementUnit}
+							{initialUnits && initialUnits > 0 && (
+								<span className="text-green-600"> • Предзаполнено из активной задачи</span>
+							)}
+						</div>
 					</div>
 
 					<div className="space-y-2">

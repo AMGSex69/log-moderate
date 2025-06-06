@@ -11,118 +11,154 @@ import { useToast } from "@/hooks/use-toast"
 import { Pause, Play, Coffee } from "lucide-react"
 
 interface BreakControlsProps {
-  onBreakStart: () => void
-  onBreakEnd: () => void
-  isOnBreak: boolean
+	onBreakStart: () => void
+	onBreakEnd: () => void
+	isOnBreak: boolean
+	isWorking: boolean
 }
 
-export default function BreakControls({ onBreakStart, onBreakEnd, isOnBreak }: BreakControlsProps) {
-  const { user } = useAuth()
-  const { toast } = useToast()
-  const [breakStartTime, setBreakStartTime] = useState<Date | null>(null)
+export default function BreakControls({ onBreakStart, onBreakEnd, isOnBreak, isWorking }: BreakControlsProps) {
+	const { user } = useAuth()
+	const { toast } = useToast()
+	const [breakStartTime, setBreakStartTime] = useState<Date | null>(null)
 
-  useEffect(() => {}, [])
+	useEffect(() => { }, [])
 
-  const handleBreakStart = async () => {
-    if (!user) return
+	const handleBreakStart = async () => {
+		if (!user) return
 
-    try {
-      const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
-      if (empError || !employeeId) throw new Error("Employee not found")
+		if (!isWorking) {
+			toast({
+				title: "Не на работе",
+				description: "Обед можно начать только в рабочее время",
+				variant: "destructive",
+			})
+			return
+		}
 
-      // Записываем начало перерыва
-      const { error } = await supabase.from("break_logs").insert({
-        employee_id: employeeId,
-        break_type: "lunch",
-        start_time: new Date().toISOString(),
-        date: new Date().toISOString().split("T")[0],
-      })
+		try {
+			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
+			if (empError || !employeeId) throw new Error("Employee not found")
 
-      if (error) throw error
+			// Записываем начало перерыва
+			const { error } = await supabase.from("break_logs").insert({
+				employee_id: employeeId,
+				break_type: "lunch",
+				start_time: new Date().toISOString(),
+				date: new Date().toISOString().split("T")[0],
+			})
 
-      setBreakStartTime(new Date())
-      onBreakStart()
+			if (error) throw error
 
-      toast({
-        title: "🍽️ Обед начат",
-        description: "Все активные задачи приостановлены",
-      })
-    } catch (error) {
-      console.error("Ошибка начала перерыва:", error)
-      toast({
-        title: "Ошибка",
-        description: "Не удалось начать перерыв",
-        variant: "destructive",
-      })
-    }
-  }
+			setBreakStartTime(new Date())
+			onBreakStart()
 
-  const handleBreakEnd = async () => {
-    if (!user) return
+			toast({
+				title: "🍽️ Обед начат",
+				description: "Все активные задачи приостановлены",
+			})
+		} catch (error) {
+			console.error("Ошибка начала перерыва:", error)
+			toast({
+				title: "Ошибка",
+				description: "Не удалось начать перерыв",
+				variant: "destructive",
+			})
+		}
+	}
 
-    try {
-      const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
-      if (empError || !employeeId) throw new Error("Employee not found")
+	const handleBreakEnd = async () => {
+		if (!user) return
 
-      // Обновляем запись перерыва
-      const { error } = await supabase
-        .from("break_logs")
-        .update({ end_time: new Date().toISOString() })
-        .eq("employee_id", employeeId)
-        .eq("date", new Date().toISOString().split("T")[0])
-        .is("end_time", null)
+		try {
+			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
+			if (empError || !employeeId) throw new Error("Employee not found")
 
-      if (error) throw error
+			// Обновляем запись перерыва
+			const { error } = await supabase
+				.from("break_logs")
+				.update({ end_time: new Date().toISOString() })
+				.eq("employee_id", employeeId)
+				.eq("date", new Date().toISOString().split("T")[0])
+				.is("end_time", null)
 
-      setBreakStartTime(null)
-      onBreakEnd()
+			if (error) throw error
 
-      toast({
-        title: "🎯 Обед завершен",
-        description: "Можно продолжать работу",
-      })
-    } catch (error) {
-      console.error("Ошибка завершения перерыва:", error)
-      toast({
-        title: "Ошибка",
-        description: "Не удалось завершить перерыв",
-        variant: "destructive",
-      })
-    }
-  }
+			setBreakStartTime(null)
+			onBreakEnd()
 
-  const formatDuration = (startTime: Date) => {
-    const now = new Date()
-    const diff = Math.floor((now.getTime() - startTime.getTime()) / 1000 / 60)
-    return `${diff} мин`
-  }
+			toast({
+				title: "🎯 Обед завершен",
+				description: "Можно продолжать работу",
+			})
+		} catch (error) {
+			console.error("Ошибка завершения перерыва:", error)
+			toast({
+				title: "Ошибка",
+				description: "Не удалось завершить перерыв",
+				variant: "destructive",
+			})
+		}
+	}
 
-  return (
-    <div className="space-y-4">
-      {/* Контроль перерыва */}
-      <PixelCard className={isOnBreak ? "bg-gradient-to-r from-orange-200 to-red-200" : ""}>
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Coffee className="h-5 w-5" />
-              <span className="font-bold">Обед</span>
-            </div>
-            {isOnBreak && breakStartTime && <Badge variant="secondary">{formatDuration(breakStartTime)}</Badge>}
-          </div>
+	const formatDuration = (startTime: Date) => {
+		const now = new Date()
+		const diff = Math.floor((now.getTime() - startTime.getTime()) / 1000 / 60)
+		return `${diff} мин`
+	}
 
-          {!isOnBreak ? (
-            <PixelButton onClick={handleBreakStart} variant="secondary" className="w-full">
-              <Pause className="h-4 w-4 mr-2" />
-              Начать обед
-            </PixelButton>
-          ) : (
-            <PixelButton onClick={handleBreakEnd} variant="success" className="w-full">
-              <Play className="h-4 w-4 mr-2" />
-              Завершить обед
-            </PixelButton>
-          )}
-        </div>
-      </PixelCard>
-    </div>
-  )
+	return (
+		<div className="space-y-4">
+			{/* Статус перерыва */}
+			{isOnBreak && breakStartTime && (
+				<div className="bg-orange-300 border-2 border-black p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+					<div className="font-mono text-xs text-black text-center font-black uppercase">
+						🍽️ ОБЕД: {formatDuration(breakStartTime)}
+					</div>
+				</div>
+			)}
+
+			{/* Кнопки управления обедом */}
+			{!isOnBreak ? (
+				<button
+					onClick={handleBreakStart}
+					disabled={!isWorking}
+					className={`
+						w-full font-mono font-black uppercase tracking-wider text-sm
+						${isWorking
+							? 'bg-orange-400 hover:bg-orange-500 text-black'
+							: 'bg-gray-300 text-gray-500 cursor-not-allowed'
+						}
+						border-4 border-black rounded-none
+						shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+						${isWorking ? 'hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px]' : ''}
+						transition-all duration-100
+						p-3
+						flex items-center justify-center gap-2
+					`}
+				>
+					<span className="text-lg">🍽️</span>
+					{isWorking ? "НАЧАТЬ ОБЕД" : "НЕДОСТУПНО"}
+				</button>
+			) : (
+				<button
+					onClick={handleBreakEnd}
+					className="
+						w-full font-mono font-black text-white uppercase tracking-wider text-sm
+						bg-gray-600 hover:bg-gray-700 
+						border-4 border-black rounded-none
+						shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+						hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+						hover:translate-x-[2px] hover:translate-y-[2px]
+						transition-all duration-100
+						p-3
+						flex items-center justify-center gap-2
+					"
+				>
+					<span className="text-lg">⏹️</span>
+					ЗАВЕРШИТЬ ОБЕД
+				</button>
+			)}
+		</div>
+	)
 }

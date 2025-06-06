@@ -7,21 +7,38 @@ import { AuthProvider } from "@/hooks/use-auth"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Игровая система задач",
-  description: "8-битная система управления задачами с геймификацией",
-    generator: 'v0.dev'
+	title: "Task Logger | Игровая система задач",
+	description: "8-битная система управления задачами с геймификацией, очками и достижениями",
+	generator: 'v0.dev',
+	icons: {
+		icon: [
+			{
+				url: '/icons/favicon-16.svg',
+				sizes: '16x16',
+				type: 'image/svg+xml',
+			},
+			{
+				url: '/favicon.svg',
+				sizes: '32x32',
+				type: 'image/svg+xml',
+			},
+		],
+		shortcut: '/favicon.svg',
+		apple: '/favicon.svg',
+	},
+	manifest: '/manifest.json',
 }
 
 export default function RootLayout({
-  children,
+	children,
 }: {
-  children: React.ReactNode
+	children: React.ReactNode
 }) {
-  return (
-    <html lang="ru">
-      <body className={inter.className}>
-        <AuthProvider>{children}</AuthProvider>
-      </body>
-    </html>
-  )
+	return (
+		<html lang="ru">
+			<body className={inter.className}>
+				<AuthProvider>{children}</AuthProvider>
+			</body>
+		</html>
+	)
 }

@@ -19,6 +19,7 @@ import { Trophy, Target, Clock, TrendingUp, ArrowLeft, Edit } from "lucide-react
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import PrizeShop from "@/components/prize-shop"
+import OfficeSelector from "@/components/office-selector"
 
 interface Achievement {
 	id: string
@@ -39,10 +40,19 @@ interface UserStats {
 	most_productive_day: string
 }
 
+interface OfficeInfo {
+	office_id: number | null
+	office_name: string | null
+}
+
 export default function ProfilePage() {
 	const { user, profile } = useAuth()
 	const router = useRouter()
 	const [achievements, setAchievements] = useState<Achievement[]>([])
+	const [officeInfo, setOfficeInfo] = useState<OfficeInfo>({
+		office_id: null,
+		office_name: null
+	})
 	const [stats, setStats] = useState<UserStats>({
 		total_tasks: 0,
 		total_time: 0,
@@ -67,6 +77,26 @@ export default function ProfilePage() {
 		try {
 			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
 			if (empError || !employeeId) return
+
+			// Получаем информацию об офисе
+			const { data: employeeData, error: employeeError } = await supabase
+				.from("employees")
+				.select("office_id, offices(name)")
+				.eq("id", employeeId)
+				.single()
+
+			if (!employeeError && employeeData) {
+				// Простая проверка на наличие имени офиса
+				let officeName = null
+				if (employeeData.offices) {
+					officeName = (employeeData.offices as any).name || null
+				}
+
+				setOfficeInfo({
+					office_id: employeeData.office_id,
+					office_name: officeName
+				})
+			}
 
 			// Получаем все логи задач
 			const { data: logsData, error: logsError } = await supabase
@@ -188,6 +218,34 @@ export default function ProfilePage() {
 		}
 
 		return unlocked
+	}
+
+	const handleOfficeUpdate = async (officeId: number, officeName: string) => {
+		if (!user) return
+
+		try {
+			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
+			if (empError || !employeeId) {
+				throw new Error("Employee not found")
+			}
+
+			const { error: employeeError } = await supabase
+				.from("employees")
+				.update({ office_id: officeId })
+				.eq("id", employeeId)
+
+			if (employeeError) throw employeeError
+
+			setOfficeInfo({
+				office_id: officeId,
+				office_name: officeName
+			})
+
+			// Показываем уведомление об успехе (если есть toast)
+			console.log(`Офис обновлен: ${officeName}`)
+		} catch (error) {
+			console.error("Ошибка обновления офиса:", error)
+		}
 	}
 
 	if (loading) {
@@ -314,7 +372,7 @@ export default function ProfilePage() {
 					<PixelCard>
 						<div className="p-6">
 							<Tabs defaultValue="achievements" className="w-full">
-								<TabsList className="grid w-full grid-cols-3 border-2 border-black">
+								<TabsList className="grid w-full grid-cols-4 border-2 border-black">
 									<TabsTrigger value="achievements" className="border-2 border-black">
 										🏆 Достижения
 									</TabsTrigger>
@@ -323,6 +381,9 @@ export default function ProfilePage() {
 									</TabsTrigger>
 									<TabsTrigger value="prizes" className="border-2 border-black">
 										🎰 Призы
+									</TabsTrigger>
+									<TabsTrigger value="settings" className="border-2 border-black">
+										⚙️ Настройки
 									</TabsTrigger>
 								</TabsList>
 
@@ -405,6 +466,80 @@ export default function ProfilePage() {
 								</TabsContent>
 								<TabsContent value="prizes" className="mt-6">
 									<PrizeShop currentCoins={stats.total_coins} onCoinsSpent={handleCoinsSpent} />
+								</TabsContent>
+
+								<TabsContent value="settings" className="mt-6">
+									<div className="space-y-6">
+										<h3 className="text-2xl font-bold flex items-center gap-2">
+											⚙️ Настройки профиля
+										</h3>
+
+										{/* Настройка офиса */}
+										<PixelCard>
+											<div className="p-4">
+												<h4 className="text-lg font-bold mb-3">🏢 Административный офис</h4>
+
+												{officeInfo.office_name ? (
+													<div className="space-y-3">
+														<div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+															<div className="flex items-center gap-2 mb-1">
+																<Badge variant="outline">{officeInfo.office_name}</Badge>
+																<span className="text-sm font-medium">Текущий офис</span>
+															</div>
+															<p className="text-sm text-muted-foreground">
+																Ваш офис определяет команду в статистике
+															</p>
+														</div>
+
+														<OfficeSelector
+															onOfficeSelect={handleOfficeUpdate}
+															currentOfficeId={officeInfo.office_id}
+															showTitle={false}
+														/>
+													</div>
+												) : (
+													<div className="space-y-3">
+														<div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
+															<p className="text-sm text-orange-800">
+																⚠️ Офис не указан. Выберите ваш административный офис для корректной работы статистики.
+															</p>
+														</div>
+
+														<OfficeSelector
+															onOfficeSelect={handleOfficeUpdate}
+															currentOfficeId={null}
+															showTitle={false}
+														/>
+													</div>
+												)}
+											</div>
+										</PixelCard>
+
+										{/* Информация о профиле */}
+										<PixelCard>
+											<div className="p-4">
+												<h4 className="text-lg font-bold mb-3">👤 Информация профиля</h4>
+												<div className="space-y-2 text-sm">
+													<div className="flex justify-between">
+														<span className="text-muted-foreground">Email:</span>
+														<span>{user?.email}</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground">Полное имя:</span>
+														<span>{profile?.full_name || "Не указано"}</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground">График работы:</span>
+														<span>{profile?.work_schedule || "Не указан"}</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground">Офис:</span>
+														<span>{officeInfo.office_name || "Не указан"}</span>
+													</div>
+												</div>
+											</div>
+										</PixelCard>
+									</div>
 								</TabsContent>
 							</Tabs>
 						</div>

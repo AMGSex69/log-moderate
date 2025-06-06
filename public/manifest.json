@@ -1,0 +1,31 @@
+{
+	"name": "Task Logger - Игровая система задач",
+	"short_name": "Task Logger",
+	"description": "8-битная система управления задачами с геймификацией",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#000000",
+	"theme_color": "#10B981",
+	"categories": [
+		"productivity",
+		"games"
+	],
+	"icons": [
+		{
+			"src": "/favicon.svg",
+			"sizes": "32x32",
+			"type": "image/svg+xml"
+		},
+		{
+			"src": "/icons/favicon-16.svg",
+			"sizes": "16x16",
+			"type": "image/svg+xml"
+		},
+		{
+			"src": "/favicon.svg",
+			"sizes": "any",
+			"type": "image/svg+xml",
+			"purpose": "any maskable"
+		}
+	]
+}
