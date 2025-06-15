@@ -152,6 +152,49 @@ export default function ProfilePage() {
 		}
 	}, [profileData.avatar_url, profileData.full_name, profileData.position, profileData.office_name])
 
+	// Слушатель изменений офиса из админки
+	useEffect(() => {
+		if (!user) return
+
+		const handleOfficeChange = async (event: Event) => {
+			const customEvent = event as CustomEvent
+			const { userId, oldOfficeId, newOfficeId } = customEvent.detail
+
+			console.log("🏢 [ПРОФИЛЬ] Получено событие изменения офиса:", customEvent.detail)
+
+			// Если изменён офис текущего пользователя, обновляем все данные
+			if (userId === user.id) {
+				console.log("✨ [ПРОФИЛЬ] Офис текущего пользователя изменён, перезагружаем данные...")
+
+				// Обновляем данные пользователя
+				await refreshUserData()
+
+				// Обновляем статистику офиса
+				await fetchOfficeStats()
+
+				// Обновляем статистику по дням (графики)
+				await fetchDailyStats()
+
+				// Обновляем информацию профиля
+				await fetchProfileInfo()
+
+				// Показываем уведомление
+				toast({
+					title: "Офис обновлён",
+					description: "Ваши данные и графики синхронизированы с новым офисом",
+				})
+			}
+		}
+
+		// Добавляем слушатель
+		window.addEventListener('officeChanged', handleOfficeChange)
+
+		// Очистка при размонтировании
+		return () => {
+			window.removeEventListener('officeChanged', handleOfficeChange)
+		}
+	}, [user])
+
 	const fetchOffices = async () => {
 		try {
 			const { data, error } = await supabase
@@ -230,11 +273,52 @@ export default function ProfilePage() {
 		const { employeeId, error: empError } = await authService.getEmployeeId(user!.id)
 		if (empError || !employeeId) return
 
-		const { data: logsData, error: logsError } = await supabase
-			.from("task_logs")
-			.select("time_spent_minutes, units_completed, work_date, task_types(name)")
-			.eq("employee_id", employeeId)
-			.order("work_date", { ascending: false })
+		// Получаем текущий офис пользователя
+		let currentOfficeId = profile?.office_id
+
+		// Если офис не найден, получаем из employees
+		if (!currentOfficeId) {
+			const { data: empData } = await supabase
+				.from("employees")
+				.select("office_id")
+				.eq("user_id", user!.id)
+				.single()
+
+			currentOfficeId = empData?.office_id
+		}
+
+		console.log("📊 [PROFILE-STATS] Загружаем статистику для офиса:", currentOfficeId)
+
+		// Выполняем запрос в зависимости от наличия офиса
+		let logsData, logsError
+
+		if (!currentOfficeId) {
+			console.warn("⚠️ [PROFILE-STATS] Офис не найден, загружаем все данные")
+			const result = await supabase
+				.from("task_logs")
+				.select("time_spent_minutes, units_completed, work_date, task_types(name)")
+				.eq("employee_id", employeeId)
+				.order("work_date", { ascending: false })
+
+			logsData = result.data
+			logsError = result.error
+		} else {
+			const result = await supabase
+				.from("task_logs")
+				.select(`
+					time_spent_minutes, 
+					units_completed, 
+					work_date, 
+					task_types(name),
+					employees!inner(office_id)
+				`)
+				.eq("employee_id", employeeId)
+				.eq("employees.office_id", currentOfficeId) // Фильтр по текущему офису
+				.order("work_date", { ascending: false })
+
+			logsData = result.data
+			logsError = result.error
+		}
 
 		if (logsError) throw logsError
 
@@ -280,19 +364,63 @@ export default function ProfilePage() {
 		const { employeeId, error: empError } = await authService.getEmployeeId(user!.id)
 		if (empError || !employeeId) return
 
-		const { data, error } = await supabase
-			.from("task_logs")
-			.select(`
-				id,
-				units_completed,
-				time_spent_minutes,
-				work_date,
-				notes,
-				task_types(name)
-			`)
-			.eq("employee_id", employeeId)
-			.order("work_date", { ascending: false })
-			.limit(20)
+		// Получаем текущий офис пользователя
+		let currentOfficeId = profile?.office_id
+
+		// Если офис не найден, получаем из employees
+		if (!currentOfficeId) {
+			const { data: empData } = await supabase
+				.from("employees")
+				.select("office_id")
+				.eq("user_id", user!.id)
+				.single()
+
+			currentOfficeId = empData?.office_id
+		}
+
+		console.log("📊 [PROFILE-HISTORY] Загружаем историю задач для офиса:", currentOfficeId)
+
+		// Выполняем запрос в зависимости от наличия офиса
+		let data, error
+
+		if (!currentOfficeId) {
+			console.warn("⚠️ [PROFILE-HISTORY] Офис не найден, загружаем все данные")
+			const result = await supabase
+				.from("task_logs")
+				.select(`
+					id,
+					units_completed,
+					time_spent_minutes,
+					work_date,
+					notes,
+					task_types(name)
+				`)
+				.eq("employee_id", employeeId)
+				.order("work_date", { ascending: false })
+				.limit(20)
+
+			data = result.data
+			error = result.error
+		} else {
+			const result = await supabase
+				.from("task_logs")
+				.select(`
+					id,
+					units_completed,
+					time_spent_minutes,
+					work_date,
+					notes,
+					task_types(name),
+					employees!inner(office_id)
+				`)
+				.eq("employee_id", employeeId)
+				.eq("employees.office_id", currentOfficeId) // Фильтр по текущему офису
+				.order("work_date", { ascending: false })
+				.limit(20)
+
+			data = result.data
+			error = result.error
+		}
 
 		if (error) throw error
 
@@ -318,12 +446,54 @@ export default function ProfilePage() {
 			sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 			const startDate = sevenDaysAgo.toISOString().split('T')[0]
 
-			const { data, error } = await supabase
-				.from("task_logs")
-				.select("work_date, units_completed, time_spent_minutes")
-				.eq("employee_id", employeeId)
-				.gte("work_date", startDate)
-				.order("work_date", { ascending: true })
+			// Получаем текущий офис пользователя из разных источников
+			let currentOfficeId = profile?.office_id
+
+			// Если офис все еще не найден, получаем из employees
+			if (!currentOfficeId) {
+				const { data: empData } = await supabase
+					.from("employees")
+					.select("office_id")
+					.eq("user_id", user!.id)
+					.single()
+
+				currentOfficeId = empData?.office_id
+			}
+
+			console.log("📊 [PROFILE-DAILY] Загружаем статистику по дням для офиса:", currentOfficeId)
+
+			// Выполняем запрос в зависимости от наличия офиса
+			let data, error
+
+			if (!currentOfficeId) {
+				console.warn("⚠️ [PROFILE-DAILY] Офис не найден, загружаем все данные")
+				const result = await supabase
+					.from("task_logs")
+					.select("work_date, units_completed, time_spent_minutes")
+					.eq("employee_id", employeeId)
+					.gte("work_date", startDate)
+					.order("work_date", { ascending: true })
+
+				data = result.data
+				error = result.error
+			} else {
+				// Запрос с фильтрацией по офису через JOIN с employees
+				const result = await supabase
+					.from("task_logs")
+					.select(`
+					work_date, 
+					units_completed, 
+					time_spent_minutes,
+					employees!inner(office_id)
+				`)
+					.eq("employee_id", employeeId)
+					.eq("employees.office_id", currentOfficeId) // Фильтр по текущему офису
+					.gte("work_date", startDate)
+					.order("work_date", { ascending: true })
+
+				data = result.data
+				error = result.error
+			}
 
 			if (error) throw error
 
