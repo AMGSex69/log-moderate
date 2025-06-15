@@ -17,6 +17,7 @@ import StatsPanel from "@/components/stats-panel"
 import PixelCard from "@/components/pixel-card"
 import PixelButton from "@/components/pixel-button"
 import CoinDisplay from "@/components/coin-display"
+import PostFactumDialog from "@/components/post-factum-dialog"
 import LevelDisplay from "@/components/level-display"
 import AchievementPopup from "@/components/achievement-popup"
 import Navigation from "@/components/navigation"
@@ -27,13 +28,18 @@ import ScheduleSelector from "@/components/schedule-selector"
 import OfficeSelector from "@/components/office-selector"
 import { Clock, Trophy, LogOut, Square } from "lucide-react"
 import { GAME_CONFIG } from "@/lib/game-config"
+import { calculateLevel, getNextLevel } from "@/lib/level-utils"
 import { appCache } from "@/lib/cache"
 import { RewardSystem } from "@/lib/reward-system"
 import PrizeWheel, { type Prize } from "@/components/prize-wheel"
+import UserProfileModal from "@/components/user-profile-modal"
+import { useUserProfileModal } from "@/hooks/use-user-profile-modal"
+import { useFreshUserData } from "@/hooks/use-fresh-user-data"
 
 export default function Home() {
 	const router = useRouter()
 	const { user, profile, signOut, loading: authLoading } = useAuth()
+	const { refresh: refreshUserData, ...freshUserData } = useFreshUserData()
 
 	// Все хуки должны быть вызваны безусловно
 	const { startSession, endSession } = useActiveSessions()
@@ -67,7 +73,25 @@ export default function Home() {
 	const [localIsPaused, setLocalIsPaused] = useState(false)
 	const [showPrizeWheel, setShowPrizeWheel] = useState(false)
 	const [wonPrize, setWonPrize] = useState<Prize | null>(null)
-	const [leaderboard, setLeaderboard] = useState<Array<{ name: string, score: string, rank: number, isCurrentUser: boolean }>>([])
+	const [leaderboard, setLeaderboard] = useState<Array<{
+		name: string,
+		score: string,
+		rank: number,
+		isCurrentUser: boolean,
+		userId?: string,
+		position?: string,
+		isOnline?: boolean,
+		totalTasks?: number,
+		totalUnits?: number,
+		totalTime?: number,
+		workDays?: number,
+		todayUnits?: number
+	}>>([])
+	const [mzhiDecisionsToday, setMzhiDecisionsToday] = useState(0)
+	const [currentOfficeName, setCurrentOfficeName] = useState("РАССВЕТ")
+
+	const [showPostFactumDialog, setShowPostFactumDialog] = useState(false)
+	const { userId: selectedUserId, isOpen: profileModalOpen, showFullStats, openProfile, closeProfile } = useUserProfileModal()
 
 	const initializingRef = useRef(false)
 	const timeUpdateRef = useRef<NodeJS.Timeout | null>(null)
@@ -113,6 +137,8 @@ export default function Home() {
 			setPageLoading(false)
 		}
 	}, [authLoading, !!user, !!profile]) // Используем !! для boolean значений
+
+
 
 	useEffect(() => {
 		setLocalIsWorking(isWorking)
@@ -303,39 +329,220 @@ export default function Home() {
 		}
 	}, [user?.id])
 
+	// Функция для правильного склонения слова "день"
+	const getDaysText = (count: number): string => {
+		if (count % 10 === 1 && count % 100 !== 11) {
+			return `${count} день`
+		} else if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
+			return `${count} дня`
+		} else {
+			return `${count} дней`
+		}
+	}
+
 	const fetchLeaderboard = useCallback(async () => {
 		try {
 			console.log("📋 Fetching leaderboard...")
+			const todayStr = new Date().toISOString().split('T')[0]
 
-			// Используем новую функцию для получения лидеров с отметкой текущего пользователя
-			const { data, error } = await supabase
-				.rpc('get_leaderboard_with_current_user', {
-					current_user_id: user?.id
-				})
+			// Получаем офис текущего пользователя
+			let userOfficeId = 1 // По умолчанию офис "Рассвет"
 
-			if (error) {
-				console.error("❌ Error loading leaderboard:", error)
-				// Если функция не найдена, возвращаем пустой массив
-				if (error.code === 'PGRST202' || error.message?.includes('function') || error.message?.includes('not found')) {
-					console.log("⚠️ Leaderboard function not available, using empty leaderboard")
-					setLeaderboard([])
-					return
+			if (user) {
+				console.log("🔍 Поиск офиса пользователя:", { userId: user.id, email: user.email })
+
+				// Получаем СВЕЖИЕ данные офиса пользователя из employees (админка)
+				const { data: employeeData, error: employeeError } = await supabase
+					.from("employees")
+					.select("office_id, full_name, user_id")
+					.eq("user_id", user.id)
+					.maybeSingle()
+
+				console.log("🔄 Загружаем данные из employees (админка):", employeeData, employeeError)
+
+				if (employeeData?.office_id) {
+					userOfficeId = employeeData.office_id
+					console.log("🏢 User office from employees:", employeeData)
+					console.log("🏢 НАЙДЕН ОФИС:", userOfficeId)
+				} else {
+					console.log("⚠️ Сотрудник не найден в employees, используем офис по умолчанию:", userOfficeId)
+					console.log("⚠️ Пытаемся найти в user_profiles:")
+
+					// Fallback: попробуем найти в user_profiles
+					const { data: profileData } = await supabase
+						.from("user_profiles")
+						.select("office_id, office_name")
+						.eq("id", user.id)
+						.maybeSingle()
+
+					console.log("📋 Данные из user_profiles:", profileData)
 				}
-				throw error
 			}
 
-			const leaderboardData = (data || []).map((leader: any, index: number) => ({
-				name: leader.name,
-				score: leader.score,
-				rank: leader.rank,
-				isCurrentUser: leader.is_current_user,
-			}))
+			console.log("🏢 Loading leaderboard for office_id:", userOfficeId)
+
+			// Получаем название офиса из таблицы offices
+			console.log("🔍 Ищем название офиса для office_id:", userOfficeId)
+			const { data: officeInfo } = await supabase
+				.from("offices")
+				.select("id, name")
+				.eq("id", userOfficeId)
+				.maybeSingle()
+
+			console.log("🏢 Результат поиска офиса:", officeInfo)
+
+			if (officeInfo?.name) {
+				console.log("🏢 УСТАНАВЛИВАЕМ НАЗВАНИЕ ОФИСА:", officeInfo.name)
+				setCurrentOfficeName(officeInfo.name.toUpperCase())
+				console.log("🏢 Office name from offices table:", officeInfo.name)
+			} else {
+				console.log("❌ Офис не найден, используем по умолчанию")
+			}
+
+			// Получаем всех сотрудников из офиса (из админки)
+			const { data: allEmployees } = await supabase
+				.from("employees")
+				.select(`
+					id,
+					user_id,
+					full_name,
+					position,
+					office_id,
+					avatar_url,
+					is_active
+				`)
+				.eq("office_id", userOfficeId)
+				.eq("is_active", true)
+
+			if (!allEmployees) {
+				console.error("❌ No employees found")
+				setLeaderboard([])
+				return
+			}
+
+			// Получаем статистику за СЕГОДНЯ для верхней панели (топ активных)
+			const { data: todayStats } = await supabase
+				.from("task_logs")
+				.select(`
+					employee_id,
+					units_completed,
+					time_spent_minutes,
+					task_types!inner(name)
+				`)
+				.eq("work_date", todayStr)
+				.in("employee_id", allEmployees.map(emp => emp.id))
+
+			// Получаем статистику за ВСЕ ВРЕМЯ для нижней панели лидеров
+			const { data: allTimeStats } = await supabase
+				.from("task_logs")
+				.select(`
+					employee_id,
+					units_completed,
+					time_spent_minutes,
+					work_date
+				`)
+				.in("employee_id", allEmployees.map(emp => emp.id))
+
+			// Группируем статистику за СЕГОДНЯ для топ активных
+			const todayStatsMap = new Map<number, any>()
+
+			todayStats?.forEach((log: any) => {
+				const empId = log.employee_id
+				const existing = todayStatsMap.get(empId) || {
+					totalUnits: 0,
+					totalTime: 0,
+					totalTasks: 0
+				}
+
+				existing.totalUnits += log.units_completed
+				existing.totalTime += log.time_spent_minutes
+				existing.totalTasks += 1
+
+				todayStatsMap.set(empId, existing)
+			})
+
+			// Группируем статистику за ВСЕ ВРЕМЯ для лидерборда
+			const allTimeStatsMap = new Map<number, any>()
+			const workDaysMap = new Map<number, Set<string>>()
+
+			allTimeStats?.forEach((log: any) => {
+				const empId = log.employee_id
+				const existing = allTimeStatsMap.get(empId) || {
+					totalUnits: 0,
+					totalTime: 0,
+					totalTasks: 0
+				}
+
+				existing.totalUnits += log.units_completed
+				existing.totalTime += log.time_spent_minutes
+				existing.totalTasks += 1
+
+				allTimeStatsMap.set(empId, existing)
+
+				// Считаем уникальные дни работы
+				if (!workDaysMap.has(empId)) {
+					workDaysMap.set(empId, new Set())
+				}
+				workDaysMap.get(empId)!.add(log.work_date)
+			})
+
+			// Формируем лидерборд за ВСЕ ВРЕМЯ (для нижней панели)
+			const leaderboardData = allEmployees.map((employee: any) => {
+				const allTimeStats = allTimeStatsMap.get(employee.id) || {
+					totalUnits: 0,
+					totalTime: 0,
+					totalTasks: 0
+				}
+				const todayStats = todayStatsMap.get(employee.id) || {
+					totalUnits: 0,
+					totalTime: 0,
+					totalTasks: 0
+				}
+				const workDays = workDaysMap.get(employee.id)?.size || 0
+
+				return {
+					name: employee.full_name,
+					userId: employee.user_id,
+					position: employee.position,
+					isOnline: false,
+					score: `${allTimeStats.totalUnits} ед. • ${workDays} дн.`,
+					totalTasks: allTimeStats.totalTasks,
+					totalUnits: allTimeStats.totalUnits, // За все время для нижней панели
+					totalTime: allTimeStats.totalTime,
+					workDays: workDays,
+					todayUnits: todayStats.totalUnits, // За сегодня для верхней панели
+					isCurrentUser: employee.user_id === user?.id,
+					rank: 0 // Будет установлен после сортировки
+				}
+			})
+				// Сортируем по количеству единиц за все время
+				.sort((a, b) => b.totalUnits - a.totalUnits)
+				.map((leader, index) => ({
+					...leader,
+					rank: index + 1
+				}))
 
 			setLeaderboard(leaderboardData)
-			console.log("✅ Leaderboard loaded:", leaderboardData.length)
+
+			// Считаем МЖИ решения за сегодня отдельно
+			const mzhiCount = todayStats?.filter((log: any) =>
+				log.task_types.name === "Внесение решений МЖИ (кол-во бланков)"
+			).reduce((sum: number, log: any) => sum + log.units_completed, 0) || 0
+			setMzhiDecisionsToday(mzhiCount)
+
+			// Детальное логирование для отладки
+			console.log("✅ Leaderboard loaded:", leaderboardData.length, "employees from office_id:", userOfficeId)
+			console.log("👤 Current user ID:", user?.id)
+			console.log("📋 All employees in office:", allEmployees?.map(e => ({
+				id: e.id,
+				user_id: e.user_id,
+				name: e.full_name,
+				office_id: e.office_id
+			})))
+			console.log("🎯 Current user in leaderboard:", leaderboardData.find(l => l.isCurrentUser))
+			console.log("📊 МЖИ решений за сегодня:", mzhiCount)
 		} catch (error) {
 			console.error("❌ Error loading leaderboard:", error)
-			// Fallback к пустому массиву при ошибке
 			setLeaderboard([])
 		}
 	}, [user?.id])
@@ -412,28 +619,24 @@ export default function Home() {
 		if (!user) return
 
 		try {
-			// Обновляем офис в таблице employees
-			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
-			if (empError || !employeeId) {
-				throw new Error("Employee not found")
+			// Используем безопасную функцию для обновления офиса
+			const { data: updateResult, error: updateError } = await supabase
+				.rpc('update_user_office', {
+					user_uuid: user.id,
+					new_office_id: districtId
+				})
+
+			if (updateError || !updateResult) {
+				throw new Error(updateError?.message || "Не удалось обновить офис")
 			}
 
-			const { error: employeeError } = await supabase
-				.from("employees")
-				.update({ office_id: districtId })
-				.eq("id", employeeId)
-
-			if (employeeError) throw employeeError
-
-			// Также обновляем в user_profiles для совместимости
-			const { error: profileError } = await supabase
-				.from("user_profiles")
-				.update({ office_id: districtId })
-				.eq("id", user.id)
-
-			if (profileError) throw profileError
-
 			setNeedsDistrictSetup(false)
+
+			// Обновляем лидерборд для нового офиса
+			await fetchLeaderboard()
+
+			// Обновляем данные пользователя для отображения нового офиса
+			refreshUserData()
 
 			toast({
 				title: "Офис сохранен!",
@@ -745,6 +948,71 @@ export default function Home() {
 		}
 	}
 
+	// Обработчик сохранения постфактум задачи
+	const handleSavePostFactumTask = async (taskData: {
+		taskTypeId: number
+		taskName: string
+		units: number
+		timeSpent: number
+		workDate: string
+		startTime: string
+		endTime: string
+	}) => {
+		try {
+			console.log("💾 Saving post-factum task:", taskData)
+
+			const { employeeId, error: empError } = await authService.getEmployeeId(user!.id)
+			if (empError || !employeeId) {
+				throw new Error("Employee ID not found")
+			}
+
+			// Сохраняем в task_logs
+			const { error: logError } = await supabase.from("task_logs").insert({
+				employee_id: employeeId,
+				task_type_id: taskData.taskTypeId,
+				units_completed: taskData.units,
+				time_spent_minutes: taskData.timeSpent,
+				work_date: taskData.workDate,
+				created_at: new Date().toISOString(),
+				notes: `Добавлено постфактум: ${taskData.startTime} - ${taskData.endTime}`,
+			})
+
+			if (logError) {
+				console.error("❌ Error saving task log:", logError)
+				throw logError
+			}
+
+			// Рассчитываем монеты
+			const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskData.taskName] || 5
+			const coinsEarned = taskData.units * coinsPerUnit
+			const newTotalCoins = playerCoins + coinsEarned
+			setPlayerCoins(newTotalCoins)
+
+			// Обновляем кэш монет
+			appCache.set(`player_coins_${user!.id}`, newTotalCoins, 10)
+
+			// Обновляем статистику
+			fetchLeaderboard()
+
+			const timeFormatted = `${Math.floor(taskData.timeSpent / 60)}:${(taskData.timeSpent % 60).toString().padStart(2, '0')}`
+
+			toast({
+				title: "✅ Задача добавлена!",
+				description: `${taskData.taskName}: ${taskData.units} ед., ${timeFormatted}, +${coinsEarned} очков`,
+			})
+
+			console.log("✅ Post-factum task saved successfully")
+		} catch (error) {
+			console.error("❌ Error saving post-factum task:", error)
+			toast({
+				title: "Ошибка",
+				description: "Не удалось сохранить задачу",
+				variant: "destructive",
+			})
+			throw error
+		}
+	}
+
 	// Группируем задачи по категориям - МЕМОИЗИРУЕМ
 	const groupedTasks = useMemo(() => {
 		return Object.entries(GAME_CONFIG.TASK_GROUPS)
@@ -770,6 +1038,48 @@ export default function Home() {
 			isActive: task.isActive,
 		}))
 	}, [activeTasks])
+
+	// Слушатель изменений офиса из админки
+	useEffect(() => {
+		if (!user) return
+
+		const handleOfficeChange = async (event: Event) => {
+			const customEvent = event as CustomEvent
+			const { userId, oldOfficeId, newOfficeId } = customEvent.detail
+
+			console.log("🏢 [ГЛАВНАЯ] Получено событие изменения офиса:", customEvent.detail)
+
+			// Если изменён офис текущего пользователя, обновляем все данные
+			if (userId === user.id) {
+				console.log("✨ [ГЛАВНАЯ] Офис текущего пользователя изменён, перезагружаем данные...")
+
+				// Обновляем данные пользователя
+				await refreshUserData()
+
+				// Перезагружаем лидерборд
+				await fetchLeaderboard()
+
+				// Показываем уведомление
+				toast({
+					title: "Офис обновлён",
+					description: "Ваши данные синхронизированы с новым офисом",
+				})
+			} else {
+				console.log("📊 [ГЛАВНАЯ] Офис другого пользователя изменён, обновляем лидерборд...")
+
+				// Если изменён офис другого пользователя, просто обновляем лидерборд
+				await fetchLeaderboard()
+			}
+		}
+
+		// Добавляем слушатель события
+		window.addEventListener('officeChanged', handleOfficeChange)
+
+		// Убираем слушатель при размонтировании
+		return () => {
+			window.removeEventListener('officeChanged', handleOfficeChange)
+		}
+	}, [user?.id, refreshUserData, fetchLeaderboard, toast])
 
 	// Показываем загрузку только если auth загружается ИЛИ данные загружаются
 	if (authLoading || (user && profile && pageLoading)) {
@@ -827,14 +1137,21 @@ export default function Home() {
 					<div className="flex items-center justify-between mb-6">
 						<div className="text-white">
 							<h1 className="text-4xl font-bold">🎮 Рабочая станция</h1>
-							<p className="text-xl">Игрок: {profile?.full_name || "Загрузка..."}</p>
+							<p className="text-xl">Игрок: {freshUserData.full_name || "Загрузка..."}</p>
 						</div>
 						<div className="flex items-center gap-4">
-							<PixelCard className="bg-gradient-to-r from-yellow-200 to-yellow-300">
-								<div className="p-3">
-									<CoinDisplay coins={playerCoins} animated />
+							{/* Дата */}
+							<PixelCard className="bg-gradient-to-r from-blue-200 to-blue-300">
+								<div className="p-3 flex items-center gap-2 text-lg font-mono">
+									<span className="text-xl">📅</span>
+									{new Date().toLocaleDateString('ru-RU', {
+										day: '2-digit',
+										month: '2-digit',
+										year: 'numeric'
+									})}
 								</div>
 							</PixelCard>
+							{/* Время */}
 							<PixelCard>
 								<div className="p-3 flex items-center gap-2 text-lg font-mono">
 									<Clock className="h-5 w-5" />
@@ -1106,7 +1423,7 @@ export default function Home() {
 							{/* Профиль игрока - пиксельный стиль */}
 							<div className="relative">
 								<div className="
-									bg-gradient-to-br from-blue-300 to-blue-400 
+									bg-gradient-to-br from-purple-300 to-pink-300 
 									border-4 border-black rounded-none
 									shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
 									p-4
@@ -1131,37 +1448,119 @@ export default function Home() {
 													ПРОФИЛЬ
 												</h3>
 												<p className="font-mono text-sm text-black font-semibold">
-													Статистика игрока
+													{freshUserData.full_name || "Игрок"}
 												</p>
 											</div>
 										</div>
 
-										{/* Информация об уровне */}
-										<div className="bg-black border-2 border-white p-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-											<div className="flex items-center justify-between">
-												<div className="flex items-center gap-2">
-													<span className="text-2xl">💎</span>
-													<div className="text-white">
-														<div className="font-mono font-black text-sm uppercase">Алмаз</div>
-														<div className="font-mono text-xs">Уровень 5</div>
-													</div>
-												</div>
-												<div className="text-right text-white">
-													<div className="font-mono font-black text-lg">{playerCoins}</div>
-													<div className="font-mono text-xs">очков</div>
-												</div>
+										{/* Монетки под ФИО */}
+										<div className="mb-3">
+											<div className="bg-gradient-to-r from-yellow-300 via-yellow-400 to-yellow-600 border-2 border-yellow-800 px-3 py-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] rounded-lg">
+												<CoinDisplay coins={playerCoins} animated />
 											</div>
+										</div>
 
-											{/* Прогресс бар в пиксельном стиле */}
-											<div className="mt-3">
-												<div className="bg-gray-600 border border-gray-400 h-3 relative">
-													<div className="bg-green-400 h-full" style={{ width: '75%' }}></div>
-													<div className="absolute inset-0 bg-black/20" style={{
-														background: 'repeating-linear-gradient(90deg, transparent 0px, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)'
-													}}></div>
+										{/* Информация об уровне с новой системой */}
+										<div className="bg-black border-2 border-white p-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+											{(() => {
+												const currentLevel = calculateLevel(playerCoins)
+												const nextLevel = getNextLevel(playerCoins)
+
+												return (
+													<>
+														<div className="flex items-center justify-between">
+															<div className="flex items-center gap-2">
+																<span className="text-2xl">{currentLevel.icon}</span>
+																<div className="text-white">
+																	<div className="font-mono font-black text-sm uppercase">{currentLevel.name}</div>
+																	<div className="font-mono text-xs">Уровень {currentLevel.level}</div>
+																</div>
+															</div>
+															<div className="text-right text-white">
+																<div className="font-mono font-black text-lg">{playerCoins}</div>
+																<div className="font-mono text-xs">очков</div>
+															</div>
+														</div>
+
+														{/* Прогресс бар с новой системой */}
+														<div className="mt-3">
+															{nextLevel ? (
+																<>
+																	<div className="bg-gray-800 border-2 border-gray-600 h-4 relative overflow-hidden">
+																		<div
+																			className="bg-gradient-to-r from-yellow-400 to-yellow-600 h-full transition-all duration-500"
+																			style={{
+																				width: `${Math.max(0, Math.min(100, ((playerCoins - currentLevel.minCoins) / (nextLevel.minCoins - currentLevel.minCoins)) * 100))}%`
+																			}}
+																		></div>
+																		<div className="absolute inset-0 bg-black/10" style={{
+																			background: 'repeating-linear-gradient(90deg, transparent 0px, transparent 3px, rgba(0,0,0,0.1) 3px, rgba(0,0,0,0.1) 6px)'
+																		}}></div>
+																	</div>
+																	<div className="font-mono text-xs text-gray-300 mt-1 flex justify-between">
+																		<span>Уровень {currentLevel.level}</span>
+																		<span>До {nextLevel.level}: {nextLevel.minCoins - playerCoins} 🪙</span>
+																	</div>
+																</>
+															) : (
+																<div className="text-xs text-yellow-400 font-mono text-center">
+																	🏆 МАКСИМАЛЬНЫЙ УРОВЕНЬ 🏆
+																</div>
+															)}
+														</div>
+													</>
+												)
+											})()}
+										</div>
+									</button>
+
+									{/* Нижние декоративные пиксели */}
+									<div className="absolute bottom-1 left-1 w-2 h-2 bg-green-400 border border-black"></div>
+									<div className="absolute bottom-1 right-1 w-2 h-2 bg-blue-400 border border-black"></div>
+								</div>
+								<div className="absolute inset-0 bg-black translate-x-1 translate-y-1 -z-10 rounded-none"></div>
+							</div>
+
+							{/* Кнопка добавления задачи постфактум */}
+							<div className="relative">
+								<div className="
+									bg-gradient-to-br from-orange-300 to-red-300 
+									border-4 border-black rounded-none
+									shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
+									p-4
+									transition-all duration-100
+									hover:translate-x-[1px] hover:translate-y-[1px] 
+									hover:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]
+								">
+									{/* Декоративные пиксели */}
+									<div className="absolute top-1 left-1 w-2 h-2 bg-yellow-400 border border-black"></div>
+									<div className="absolute top-1 right-1 w-2 h-2 bg-red-400 border border-black"></div>
+
+									<button
+										onClick={() => setShowPostFactumDialog(true)}
+										className="w-full text-left group"
+									>
+										<div className="flex items-center gap-3 mb-3">
+											<div className="bg-white border-2 border-black p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+												<span className="text-xl">⏰</span>
+											</div>
+											<div>
+												<h3 className="font-mono font-black text-lg text-black uppercase tracking-wide">
+													ОТЛОЖЕННЫЕ ЗАДАЧИ
+												</h3>
+												<p className="font-mono text-sm text-black font-semibold">
+													Добавить задачу
+												</p>
+											</div>
+										</div>
+
+										<div className="bg-black border-2 border-white p-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+											<div className="text-center">
+												<div className="font-mono font-black text-sm text-white uppercase mb-1">
+													Забыли включить таймер?
 												</div>
-												<div className="font-mono text-xs text-gray-300 mt-1">
-													До следующего: 115 очков
+												<div className="font-mono text-xs text-gray-300">
+													Укажите время и количество
 												</div>
 											</div>
 										</div>
@@ -1229,7 +1628,7 @@ export default function Home() {
 								<div className="absolute inset-0 bg-black translate-x-1 translate-y-1 -z-10 rounded-none"></div>
 							</div>
 
-							{/* Статистика офиса - пиксельный стиль */}
+							{/* Расширенная статистика офиса - пиксельный стиль */}
 							<div className="relative">
 								<div className="
 									bg-gradient-to-br from-purple-300 to-purple-400 
@@ -1247,47 +1646,59 @@ export default function Home() {
 										</div>
 										<div>
 											<h3 className="font-mono font-black text-base text-black uppercase tracking-wide">
-												ОФИС {profile?.office_name || "РАССВЕТ"}
+												ОФИС {currentOfficeName}
 											</h3>
 											<p className="font-mono text-sm text-black font-semibold">
-												Сводка команды
+												Сводка команды за сегодня
 											</p>
 										</div>
 									</div>
 
-									{/* Статистика в пиксельном стиле */}
-									<div className="bg-black border-2 border-white p-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-										<div className="grid grid-cols-2 gap-3 text-white font-mono">
+									{/* Основная статистика в пиксельном стиле */}
+									<div className="bg-black border-2 border-white p-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] mb-3">
+										<div className="grid grid-cols-3 gap-4 text-white font-mono">
 											<div>
 												<div className="text-xs text-gray-300">ВСЕГО</div>
 												<div className="font-black text-lg text-green-400">
-													{profile?.office_stats?.total_employees || "0"}
+													{leaderboard.reduce((sum, member) => sum + (member.todayUnits || 0), 0)}
 												</div>
 											</div>
 											<div>
 												<div className="text-xs text-gray-300">ОНЛАЙН</div>
 												<div className="font-black text-lg text-blue-400">
-													{profile?.office_stats?.working_employees || "0"}
+													{leaderboard.filter(member => member.isOnline).length || "0"}
 												</div>
 											</div>
 											<div>
-												<div className="text-xs text-gray-300">СЕГОДНЯ</div>
-												<div className="font-black text-lg text-yellow-400">
-													{profile?.office_stats?.total_hours_today
-														? `${Math.round(profile.office_stats.total_hours_today)}ч`
-														: "0ч"
-													}
+												<div className="text-xs text-gray-300">МЖИ РЕШЕНИЙ</div>
+												<div className="font-black text-lg text-red-400">
+													{mzhiDecisionsToday}
 												</div>
 											</div>
-											<div>
-												<div className="text-xs text-gray-300">СРЕДН.</div>
-												<div className="font-black text-lg text-purple-400">
-													{profile?.office_stats?.avg_hours_today
-														? `${Math.round(profile.office_stats.avg_hours_today)}ч`
-														: "0ч"
-													}
-												</div>
-											</div>
+										</div>
+									</div>
+
+									{/* Топ активных сегодня */}
+									<div className="bg-gray-800 border-2 border-gray-600 p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+										<div className="text-xs text-gray-300 font-mono mb-2 uppercase">Топ активных:</div>
+										<div className="space-y-1">
+											{leaderboard
+												.filter(member => (member.todayUnits || 0) > 0)
+												.sort((a, b) => (b.todayUnits || 0) - (a.todayUnits || 0))
+												.slice(0, 3)
+												.map((member, index) => (
+													<div key={index} className="flex items-center justify-between text-xs font-mono">
+														<div className="flex items-center gap-2">
+															<div className={`w-1 h-1 rounded-full ${member.isOnline ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`}></div>
+															<span className={`${member.isCurrentUser ? 'text-yellow-400 font-black' : 'text-white'} truncate max-w-[80px]`}>
+																{member.name.split(' ')[0]}
+															</span>
+														</div>
+														<div className="text-green-400 font-black">
+															{member.todayUnits || 0}
+														</div>
+													</div>
+												))}
 										</div>
 									</div>
 
@@ -1362,7 +1773,7 @@ export default function Home() {
 												ЛИДЕРЫ
 											</h3>
 											<p className="font-mono text-sm text-black font-semibold">
-												Топ-5 недели
+												Все сотрудники офиса
 											</p>
 										</div>
 									</div>
@@ -1380,12 +1791,22 @@ export default function Home() {
 															}`}>
 															#{leader.rank}
 														</span>
-														<span className={`text-sm font-black ${leader.isCurrentUser ? 'text-green-400' : 'text-white'
-															}`}>
-															{leader.name}
-														</span>
+														<div className="flex flex-col">
+															<span
+																className={`text-sm font-black cursor-pointer hover:text-blue-300 transition-colors ${leader.isCurrentUser ? 'text-green-400' : 'text-white'
+																	}`}
+																onClick={() => leader.userId && openProfile(leader.userId, true)}
+															>
+																{leader.name} {!leader.isCurrentUser && '👤'}
+																{leader.isOnline && <span className="text-green-400 text-xs ml-1">●</span>}
+															</span>
+															<span className="text-xs text-gray-400">{leader.position}</span>
+														</div>
 													</div>
-													<span className="text-xs text-gray-300">{leader.score}</span>
+													<div className="text-right">
+														<div className="text-xs text-yellow-300">{leader.totalUnits} единиц</div>
+														<div className="text-xs text-gray-300">{getDaysText(leader.workDays || 0)}</div>
+													</div>
 												</div>
 											)) : (
 												<div className="text-center py-4">
@@ -1427,6 +1848,22 @@ export default function Home() {
 				<Toaster />
 				{/* Крутилка призов */}
 				<PrizeWheel isOpen={showPrizeWheel} onClose={handleCloseWheel} onPrizeWon={handlePrizeWon} />
+
+				{/* Модальное окно профиля пользователя */}
+				<UserProfileModal
+					userId={selectedUserId}
+					isOpen={profileModalOpen}
+					onClose={closeProfile}
+					showFullStats={showFullStats}
+				/>
+
+				{/* Диалог добавления задачи постфактум */}
+				<PostFactumDialog
+					isOpen={showPostFactumDialog}
+					onClose={() => setShowPostFactumDialog(false)}
+					onSave={handleSavePostFactumTask}
+					taskTypes={taskTypes}
+				/>
 			</main>
 		</AuthGuard>
 	)

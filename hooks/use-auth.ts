@@ -36,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [error, setError] = useState<string | null>(null)
 	const initialized = useRef(false)
 	const authStateListenerRef = useRef<any>(null)
+	const profileLoadingRef = useRef(false)
 
 	useEffect(() => {
 		// Предотвращаем повторную инициализацию
@@ -56,6 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					setUser(cachedUser)
 					setProfile(cachedProfile)
 					setLoading(false)
+					console.log("✅ Loaded from cache, loading set to false")
 					return
 				}
 
@@ -100,20 +102,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 						console.log("✅ User found:", session.user.id)
 						setUser(session.user)
 
-						try {
-							console.log("👤 Loading user profile...")
-							const { profile } = await authService.getUserProfile(session.user.id)
-							console.log("👤 Profile loaded:", !!profile)
-							setProfile(profile)
+						// Загружаем профиль с retry логикой
+						const loadProfileWithRetry = async (retries = 3) => {
+							// Предотвращаем множественные одновременные загрузки
+							if (profileLoadingRef.current) {
+								console.log("🔄 Profile already loading, skipping...")
+								return
+							}
 
-							// Кэшируем данные
-							appCache.set("current_user", session.user, 30)
-							appCache.set("user_profile", profile, 30)
-							console.log("💾 Auth data cached")
-						} catch (profileError) {
-							console.error("❌ Profile error:", profileError)
-							console.log("⚠️ Profile error ignored, user authenticated")
+							profileLoadingRef.current = true
+							try {
+								for (let i = 0; i < retries; i++) {
+									try {
+										console.log(`👤 Loading user profile... (attempt ${i + 1}/${retries})`)
+										const { profile, error } = await authService.getUserProfile(session.user.id)
+
+										if (error) {
+											console.warn(`⚠️ Profile load error (attempt ${i + 1}):`, error)
+											if (i === retries - 1) {
+												// На последней попытке создаем базовый профиль
+												console.log("🔧 Creating fallback profile...")
+												const fallbackProfile = {
+													id: session.user.id,
+													full_name: session.user.user_metadata?.full_name || session.user.email || "Пользователь",
+													position: "Сотрудник",
+													is_admin: false,
+													role: 'user',
+													work_schedule: "5/2",
+													work_hours: 9,
+													is_online: false,
+													created_at: new Date().toISOString(),
+													updated_at: new Date().toISOString(),
+													office_name: 'Рассвет',
+													office_stats: {
+														total_employees: 3,
+														working_employees: 1,
+														total_hours_today: 4.5,
+														avg_hours_today: 4.5
+													}
+												}
+												setProfile(fallbackProfile)
+												appCache.set("user_profile", fallbackProfile, 5) // Короткий кэш для fallback
+												break
+											}
+											continue
+										}
+
+										console.log("👤 Profile loaded:", !!profile)
+										setProfile(profile)
+
+										// Кэшируем данные
+										appCache.set("current_user", session.user, 30)
+										appCache.set("user_profile", profile, 30)
+										console.log("💾 Auth data cached")
+										break
+									} catch (profileError) {
+										console.error(`❌ Profile error (attempt ${i + 1}):`, profileError)
+										if (i < retries - 1) {
+											// Ждем перед следующей попыткой
+											await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
+										} else {
+											console.log("⚠️ All profile load attempts failed, user authenticated without profile")
+										}
+									}
+								}
+							} finally {
+								profileLoadingRef.current = false
+							}
 						}
+
+						await loadProfileWithRetry()
 					} else {
 						console.log("👤 No user session found")
 					}
@@ -155,7 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			} finally {
 				console.log("🏁 Auth initialization complete - setting loading to false")
 				setLoading(false)
-				console.log("✅ Auth initialization complete")
+				console.log("✅ Auth initialization complete, loading state:", false)
 			}
 		}
 
@@ -189,27 +247,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					setLoading(false)
 
 					if (session?.user) {
-						// Используем Promise для асинхронной загрузки профиля
-						authService.getUserProfile(session.user.id)
-							.then(({ profile }) => {
-								if (isMounted) {
-									setProfile(profile)
-									appCache.set("current_user", session.user, 30)
-									appCache.set("user_profile", profile, 30)
-								}
-							})
-							.catch(error => {
-								console.error("❌ Profile fetch error:", error)
-							})
+						// Используем Promise для асинхронной загрузки профиля с защитой от дублирования
+						if (!profileLoadingRef.current) {
+							profileLoadingRef.current = true
+							authService.getUserProfile(session.user.id)
+								.then(({ profile }) => {
+									if (isMounted) {
+										setProfile(profile)
+										appCache.set("current_user", session.user, 30)
+										appCache.set("user_profile", profile, 30)
+									}
+								})
+								.catch(error => {
+									console.error("❌ Profile fetch error:", error)
+								})
+								.finally(() => {
+									profileLoadingRef.current = false
+								})
+						}
 					}
 					return
 				}
 
 				if (event === 'INITIAL_SESSION') {
-					if (!initialized.current) {
-						setUser(session?.user ?? null)
-						setLoading(false)
-					}
+					setUser(session?.user ?? null)
+					setLoading(false)
 					return
 				}
 
@@ -280,9 +342,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const refreshProfile = async () => {
 		if (user) {
 			try {
-				const { profile } = await authService.getUserProfile(user.id)
-				setProfile(profile)
-				appCache.set("user_profile", profile, 30)
+				console.log("🔄 [REFRESH] Refreshing profile from database...")
+
+				// Сначала пробуем загрузить из user_profiles
+				const { data: userProfileData, error: userProfileError } = await supabase
+					.from("user_profiles")
+					.select("*")
+					.eq("id", user.id)
+					.maybeSingle()
+
+				console.log("📊 [REFRESH] user_profiles result:", { userProfileData, userProfileError })
+
+				// Если user_profiles не работает, загружаем из employees
+				let profileSource = userProfileData
+				if (userProfileError || !userProfileData) {
+					console.log("🔄 [REFRESH] Loading from employees...")
+
+					const { data: employeeData, error: employeeError } = await supabase
+						.from("employees")
+						.select(`
+							*,
+							offices(name)
+						`)
+						.eq("user_id", user.id)
+						.maybeSingle()
+
+					console.log("📊 [REFRESH] employees result:", { employeeData, employeeError })
+
+					if (!employeeError && employeeData) {
+						// Преобразуем данные employees в формат profile
+						profileSource = {
+							...employeeData,
+							office_name: employeeData.offices?.name || employeeData.office_name || "Не указан"
+						}
+						console.log("✅ [REFRESH] Using data from employees")
+					}
+				} else {
+					console.log("✅ [REFRESH] Using data from user_profiles")
+				}
+
+				if (profileSource) {
+					// Преобразуем в формат UserProfile
+					const refreshedProfile = {
+						id: profileSource.id || user.id,
+						full_name: profileSource.full_name || user.email || "Пользователь",
+						position: profileSource.position || "Сотрудник",
+						is_admin: profileSource.is_admin || false,
+						role: profileSource.role || 'user',
+						work_schedule: profileSource.work_schedule || "8+1",
+						work_hours: profileSource.work_hours || 9,
+						is_online: profileSource.is_online || false,
+						last_seen: profileSource.last_seen,
+						created_at: profileSource.created_at || new Date().toISOString(),
+						updated_at: profileSource.updated_at || new Date().toISOString(),
+						office_id: profileSource.office_id,
+						office_name: profileSource.office_name || "Не указан",
+						avatar_url: profileSource.avatar_url,
+						office_stats: profileSource.office_stats
+					}
+
+					console.log("📋 [REFRESH] Refreshed profile:", refreshedProfile)
+					setProfile(refreshedProfile)
+					appCache.set("user_profile", refreshedProfile, 30)
+					console.log("✅ [REFRESH] Profile updated in context and cache")
+				} else {
+					console.warn("⚠️ [REFRESH] No profile data found")
+					// Используем fallback данные
+					const { profile } = await authService.getUserProfile(user.id)
+					setProfile(profile)
+					appCache.set("user_profile", profile, 30)
+				}
 			} catch (error: any) {
 				console.error("❌ Profile refresh error:", error)
 				setError(error.message)

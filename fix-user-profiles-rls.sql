@@ -1,53 +1,71 @@
--- Исправление RLS политик для user_profiles
+-- ИСПРАВЛЕНИЕ RLS ДЛЯ СУЩЕСТВУЮЩЕЙ ТАБЛИЦЫ USER_PROFILES
+-- Выполните этот скрипт в Supabase SQL Editor
 
--- 1. Проверяем текущие политики
-SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check 
-FROM pg_policies 
-WHERE schemaname = 'public' AND tablename = 'user_profiles';
+-- 1. ПРОВЕРЯЕМ СТРУКТУРУ
+SELECT 'Проверяем таблицу user_profiles:' as step_1;
 
--- 2. Проверяем структуру таблицы user_profiles
-\d public.user_profiles;
+SELECT 
+    table_name,
+    table_type
+FROM information_schema.tables 
+WHERE table_schema = 'public' 
+AND table_name = 'user_profiles';
 
--- 3. Удаляем старые политики (если есть проблемы)
-DROP POLICY IF EXISTS "Users can view own profile" ON public.user_profiles;
-DROP POLICY IF EXISTS "Users can update own profile" ON public.user_profiles;
+-- 2. УДАЛЯЕМ ВСЕ СТАРЫЕ ПОЛИТИКИ ДЛЯ USER_PROFILES
+DROP POLICY IF EXISTS "Users can view profiles from same office" ON public.user_profiles;
+DROP POLICY IF EXISTS "user_profiles_select_policy" ON public.user_profiles;
+DROP POLICY IF EXISTS "Users can view basic profile info" ON public.user_profiles;
+DROP POLICY IF EXISTS "authenticated_users_can_view_profiles" ON public.user_profiles;
+DROP POLICY IF EXISTS "open_access_user_profiles" ON public.user_profiles;
+DROP POLICY IF EXISTS "user_profiles_open_read_access" ON public.user_profiles;
 
--- 4. Создаем правильные RLS политики
--- Политика для просмотра собственного профиля
-CREATE POLICY "Users can view own profile" ON public.user_profiles
-FOR SELECT USING (auth.uid() = id);
-
--- Политика для обновления собственного профиля  
-CREATE POLICY "Users can update own profile" ON public.user_profiles
-FOR UPDATE USING (auth.uid() = id);
-
--- Политика для вставки профиля при регистрации
-CREATE POLICY "Users can insert own profile" ON public.user_profiles
-FOR INSERT WITH CHECK (auth.uid() = id);
-
--- 5. Убеждаемся что RLS включен
+-- 3. ВКЛЮЧАЕМ RLS И СОЗДАЕМ ОТКРЫТУЮ ПОЛИТИКУ
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 
--- 6. Проверяем подключение к auth.users
+CREATE POLICY "user_profiles_read_access" ON public.user_profiles
+    FOR SELECT TO authenticated
+    USING (true);
+
+-- 4. ТАКЖЕ ИСПРАВЛЯЕМ ДЛЯ EMPLOYEES
+DROP POLICY IF EXISTS "Users can view employees from same office" ON public.employees;
+DROP POLICY IF EXISTS "employees_select_policy" ON public.employees;
+DROP POLICY IF EXISTS "Users can view employee info" ON public.employees;
+DROP POLICY IF EXISTS "authenticated_users_can_view_employees" ON public.employees;
+DROP POLICY IF EXISTS "open_access_employees" ON public.employees;
+DROP POLICY IF EXISTS "employees_open_read_access" ON public.employees;
+
+ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "employees_read_access" ON public.employees
+    FOR SELECT TO authenticated
+    USING (true);
+
+-- 5. ПРОВЕРЯЕМ РЕЗУЛЬТАТ
+SELECT 'Политики для user_profiles:' as step_5;
+
 SELECT 
-    up.id,
-    up.full_name,
-    up.work_schedule,
-    up.work_hours,
-    u.email
-FROM public.user_profiles up
-LEFT JOIN auth.users u ON u.id = up.id
-LIMIT 5;
+    schemaname, 
+    tablename, 
+    policyname,
+    cmd
+FROM pg_policies 
+WHERE schemaname = 'public' 
+AND tablename IN ('user_profiles', 'employees')
+ORDER BY tablename, policyname;
 
--- 7. Проверяем что нет проблем с индексами
-SELECT schemaname, tablename, indexname 
-FROM pg_indexes 
-WHERE schemaname = 'public' AND tablename = 'user_profiles';
+-- 6. ТЕСТИРУЕМ ДОСТУП
+SELECT 'Тест доступа:' as step_6;
 
--- 8. Создаем недостающий индекс если нужно
-CREATE INDEX IF NOT EXISTS user_profiles_id_idx ON public.user_profiles(id);
+SELECT 
+    'user_profiles' as table_name,
+    COUNT(*) as count
+FROM user_profiles
 
--- 9. Показываем все профили для отладки
-SELECT id, full_name, email, work_schedule, work_hours, created_at
-FROM public.user_profiles
-ORDER BY created_at DESC; 
+UNION ALL
+
+SELECT 
+    'employees' as table_name,
+    COUNT(*) as count
+FROM employees;
+
+SELECT '✅ ГОТОВО! Обе таблицы доступны для чтения.' as final_status; 

@@ -9,10 +9,11 @@ import { Badge } from "@/components/ui/badge"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { CalendarIcon, Clock, Users, Target, TrendingUp, BarChart3, Activity, User, AlertTriangle, CheckCircle, ArrowLeft, Home } from "lucide-react"
+import { CalendarIcon, Clock, Users, Target, TrendingUp, BarChart3, Activity, User, AlertTriangle, CheckCircle, ArrowLeft, Home, Shield, Crown } from "lucide-react"
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfToday, subDays, subWeeks, subMonths, addDays } from "date-fns"
 import { ru } from "date-fns/locale"
 import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/hooks/use-auth"
 
 // Типы данных
 interface TimelineSegment {
@@ -95,7 +96,16 @@ interface OverallStats {
 	daily_stats: { date: string; employees: number; tasks: number; units: number }[]
 }
 
+interface AdminAccess {
+	can_access: boolean
+	admin_role: string
+	managed_office_id?: number
+	is_super_admin: boolean
+	is_office_admin: boolean
+}
+
 export default function EnhancedDashboardV2() {
+	const { user } = useAuth()
 	const [selectedDate, setSelectedDate] = useState<Date>(new Date())
 	const [dateRange, setDateRange] = useState<{ start: Date; end: Date }>({
 		start: new Date(),
@@ -111,25 +121,62 @@ export default function EnhancedDashboardV2() {
 	const [taskStats, setTaskStats] = useState<TaskStats[]>([])
 	const [overallStats, setOverallStats] = useState<OverallStats | null>(null)
 	const [loading, setLoading] = useState(true)
+	const [adminAccess, setAdminAccess] = useState<AdminAccess | null>(null)
 
 	useEffect(() => {
-		loadEmployees()
-	}, [])
+		if (user) {
+			checkAdminAccess()
+		}
+	}, [user])
 
 	useEffect(() => {
-		loadAllData()
-	}, [selectedDate, dateRange, dateMode, selectedPreset, selectedEmployee])
+		if (adminAccess?.can_access) {
+			loadEmployees()
+		}
+	}, [adminAccess])
+
+	useEffect(() => {
+		if (adminAccess?.can_access) {
+			loadAllData()
+		}
+	}, [selectedDate, dateRange, dateMode, selectedPreset, selectedEmployee, adminAccess])
+
+	const checkAdminAccess = async () => {
+		try {
+			const { data, error } = await supabase.rpc('check_admin_access_unified', {
+				requesting_user_uuid: user!.id
+			})
+
+			if (error) throw error
+
+			if (data && data.length > 0) {
+				setAdminAccess(data[0])
+			} else {
+				setAdminAccess({ can_access: false, admin_role: 'user', is_super_admin: false, is_office_admin: false })
+			}
+		} catch (error) {
+			console.error('Ошибка проверки прав доступа:', error)
+			setAdminAccess({ can_access: false, admin_role: 'user', is_super_admin: false, is_office_admin: false })
+		}
+	}
 
 	const loadEmployees = async () => {
 		try {
-			const { data, error } = await supabase
-				.from("employees")
-				.select("id, full_name, position")
-				.eq("is_active", true)
-				.order("full_name")
+			// Используем новую функцию для получения сотрудников с учетом прав
+			const { data, error } = await supabase.rpc('get_employees_for_admin', {
+				requesting_user_uuid: user!.id
+			})
 
 			if (error) throw error
-			setEmployees(data || [])
+
+			// Преобразуем данные в нужный формат
+			const employeesData = (data || []).map((emp: any) => ({
+				id: emp.employee_id,
+				full_name: emp.full_name,
+				position: emp.employee_position
+			}))
+
+			setEmployees(employeesData)
 		} catch (error) {
 			console.error("Ошибка загрузки сотрудников:", error)
 		}
@@ -1223,14 +1270,29 @@ export default function EnhancedDashboardV2() {
 		)
 	}
 
-	if (loading) {
+	// Проверка доступа
+	if (loading || !adminAccess) {
 		return (
 			<div className="flex items-center justify-center min-h-screen">
 				<div className="text-center">
 					<Activity className="h-8 w-8 animate-spin mx-auto mb-4" />
-					<p>Загрузка расширенной аналитики...</p>
+					<p>Проверка прав доступа...</p>
 				</div>
 			</div>
+		)
+	}
+
+	if (!adminAccess.can_access) {
+		return (
+			<Card>
+				<CardContent className="p-6">
+					<div className="text-center">
+						<Shield className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+						<div className="text-lg font-semibold">Доступ запрещен</div>
+						<div className="text-gray-600">У вас нет прав для просмотра аналитики</div>
+					</div>
+				</CardContent>
+			</Card>
 		)
 	}
 
@@ -1242,9 +1304,26 @@ export default function EnhancedDashboardV2() {
 					<CardTitle className="flex items-center gap-2">
 						<BarChart3 className="h-5 w-5" />
 						Расширенная аналитика
+						{adminAccess.is_super_admin && (
+							<Badge variant="destructive" className="ml-2">
+								<Crown className="h-3 w-3 mr-1" />
+								Супер-админ
+							</Badge>
+						)}
+						{adminAccess.is_office_admin && (
+							<Badge variant="secondary" className="ml-2">
+								<Shield className="h-3 w-3 mr-1" />
+								Офис-админ
+							</Badge>
+						)}
 					</CardTitle>
 					<CardDescription>
-						Детальный анализ работы сотрудников • {getDateRangeDescription()}
+						{adminAccess.is_super_admin
+							? "Полная аналитика по всем офисам и сотрудникам"
+							: adminAccess.is_office_admin
+								? "Аналитика по вашему офису"
+								: "Ограниченная аналитика"
+						} • {getDateRangeDescription()}
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

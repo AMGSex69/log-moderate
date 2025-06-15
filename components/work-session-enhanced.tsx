@@ -652,7 +652,7 @@ export default function WorkSessionEnhanced({ onSessionChange, activeTasks = [],
 							</div>
 
 							<div className="text-center">
-								<PixelButton onClick={() => handleClockIn(false)} disabled={loading} className="w-full mb-2" variant="primary">
+								<PixelButton onClick={() => handleClockIn(false)} disabled={loading} className="w-full mb-2" variant="default">
 									🔄 Возобновить рабочий день
 								</PixelButton>
 								<p className="text-sm text-muted-foreground">

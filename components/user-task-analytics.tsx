@@ -371,7 +371,7 @@ export default function UserTaskAnalytics({ userId }: UserTaskAnalyticsProps) {
 							{(['week', 'month', 'quarter', 'year'] as const).map((p) => (
 								<PixelButton
 									key={p}
-									variant={period === p ? "primary" : "secondary"}
+									variant={period === p ? "default" : "secondary"}
 									size="sm"
 									onClick={() => setPeriod(p)}
 								>
@@ -445,21 +445,21 @@ export default function UserTaskAnalytics({ userId }: UserTaskAnalyticsProps) {
 									<h4 className="text-lg font-bold">Разбивка по типам задач</h4>
 									<div className="flex gap-2">
 										<PixelButton
-											variant={sortBy === 'units' ? "primary" : "secondary"}
+											variant={sortBy === 'units' ? "default" : "secondary"}
 											size="sm"
 											onClick={() => setSortBy('units')}
 										>
 											По единицам
 										</PixelButton>
 										<PixelButton
-											variant={sortBy === 'time' ? "primary" : "secondary"}
+											variant={sortBy === 'time' ? "default" : "secondary"}
 											size="sm"
 											onClick={() => setSortBy('time')}
 										>
 											По времени
 										</PixelButton>
 										<PixelButton
-											variant={sortBy === 'efficiency' ? "primary" : "secondary"}
+											variant={sortBy === 'efficiency' ? "default" : "secondary"}
 											size="sm"
 											onClick={() => setSortBy('efficiency')}
 										>

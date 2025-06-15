@@ -19,9 +19,43 @@ export function useOptimizedAuth() {
 			return await dbPool.executeQuery(
 				`profile_${userId}`,
 				async () => {
-					const { data, error } = await supabase.from("user_profiles").select("*").eq("id", userId).maybeSingle()
+					// ИСПРАВЛЕНО: Используем таблицу employees вместо user_profiles
+					const { data, error } = await supabase
+						.from("employees")
+						.select(`
+							id,
+							full_name,
+							position,
+							user_id,
+							office_id,
+							work_schedule,
+							work_hours,
+							is_online,
+							last_seen,
+							created_at,
+							offices(name)
+						`)
+						.eq("user_id", userId)
+						.maybeSingle()
 
 					if (error && error.code !== "PGRST116") throw error
+
+					// Преобразуем данные в формат профиля
+					if (data) {
+						return {
+							id: data.user_id,
+							full_name: data.full_name,
+							position: data.position,
+							office_id: data.office_id,
+							work_schedule: data.work_schedule,
+							work_hours: data.work_hours,
+							is_online: data.is_online,
+							last_seen: data.last_seen,
+							created_at: data.created_at,
+							office_name: (data.offices as any)?.name
+						}
+					}
+
 					return data
 				},
 				60000, // 1 минута кэш

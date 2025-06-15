@@ -3,15 +3,17 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { User, BarChart3, Gamepad2, Crown } from "lucide-react"
+import { User, BarChart3, Gamepad2, Crown, Users } from "lucide-react"
 import { useAuth } from "@/hooks/use-auth"
 
 export default function Navigation() {
 	const pathname = usePathname()
 	const { profile } = useAuth()
 
-	// Проверяем админские права как по старому полю is_admin, так и по новому полю role
-	const isAdmin = profile?.is_admin || profile?.role === 'admin'
+	// Проверяем админские права через новую систему ролей
+	const isAdmin = profile?.is_admin || profile?.role === 'admin' ||
+		(profile as any)?.admin_role === 'super_admin' ||
+		(profile as any)?.admin_role === 'office_admin'
 
 	return (
 		<div className="mb-6 relative">
@@ -65,23 +67,43 @@ export default function Navigation() {
 							</Button>
 
 							{isAdmin && (
-								<Button
-									asChild
-									className={`
-										font-mono font-bold border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] rounded-none
-										transition-all duration-100 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]
-										${pathname === "/admin"
-											? "bg-blue-300 text-black hover:bg-blue-400"
-											: "bg-white text-black hover:bg-gray-100"
-										}
-									`}
-									size="sm"
-								>
-									<Link href="/admin" className="flex items-center gap-2">
-										<BarChart3 className="h-4 w-4" />
-										АДМИН ПАНЕЛЬ
-									</Link>
-								</Button>
+								<>
+									<Button
+										asChild
+										className={`
+											font-mono font-bold border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] rounded-none
+											transition-all duration-100 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]
+											${pathname === "/admin"
+												? "bg-blue-300 text-black hover:bg-blue-400"
+												: "bg-white text-black hover:bg-gray-100"
+											}
+										`}
+										size="sm"
+									>
+										<Link href="/admin" className="flex items-center gap-2">
+											<BarChart3 className="h-4 w-4" />
+											АНАЛИТИКА
+										</Link>
+									</Button>
+
+									<Button
+										asChild
+										className={`
+											font-mono font-bold border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] rounded-none
+											transition-all duration-100 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]
+											${pathname === "/admin/employees"
+												? "bg-purple-300 text-black hover:bg-purple-400"
+												: "bg-white text-black hover:bg-gray-100"
+											}
+										`}
+										size="sm"
+									>
+										<Link href="/admin/employees" className="flex items-center gap-2">
+											<Users className="h-4 w-4" />
+											СОТРУДНИКИ
+										</Link>
+									</Button>
+								</>
 							)}
 						</div>
 					</div>

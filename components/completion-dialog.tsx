@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
 import { CheckCircle, Clock, Hash, Plus, Minus } from "lucide-react"
+import PixelButton from "@/components/pixel-button"
 
 interface CompletionDialogProps {
 	isOpen: boolean
@@ -39,6 +40,7 @@ export default function CompletionDialog({
 	const [units, setUnits] = useState("")
 	const [notes, setNotes] = useState("")
 	const [loading, setLoading] = useState(false)
+	const [success, setSuccess] = useState(false)
 	const [measurementUnit, setMeasurementUnit] = useState("единиц")
 
 	useEffect(() => {
@@ -94,10 +96,16 @@ export default function CompletionDialog({
 		if (!units || Number.parseInt(units) <= 0) return
 
 		setLoading(true)
+		setSuccess(false)
 		try {
 			await onSave(Number.parseInt(units), notes)
-			setUnits("")
-			setNotes("")
+			setSuccess(true)
+			// Небольшая задержка для показа анимации успеха
+			setTimeout(() => {
+				setUnits("")
+				setNotes("")
+				setSuccess(false)
+			}, 1500)
 		} catch (error) {
 			console.error("Ошибка сохранения:", error)
 		} finally {
@@ -236,16 +244,20 @@ export default function CompletionDialog({
 				</div>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={handleClose} disabled={loading}>
+					<Button variant="outline" onClick={handleClose} disabled={loading || success}>
 						Отмена
 					</Button>
-					<Button
+					<PixelButton
 						onClick={handleSave}
-						disabled={!units || Number.parseInt(units) <= 0 || loading}
-						className="bg-green-600 hover:bg-green-700"
+						disabled={!units || Number.parseInt(units) <= 0}
+						loading={loading}
+						success={success}
+						loadingText="💾 Сохранение..."
+						successText="✅ Готово!"
+						variant="default"
 					>
-						{loading ? "Сохранение..." : "Сохранить результат"}
-					</Button>
+						Сохранить результат
+					</PixelButton>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

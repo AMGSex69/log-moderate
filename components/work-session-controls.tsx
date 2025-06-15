@@ -426,7 +426,7 @@ export default function WorkSessionControls({ onSessionChange }: WorkSessionCont
 							onClick={() => clockIn(false)}
 							disabled={loading}
 							className="w-full"
-							variant={canResumeWork() ? "primary" : "success"}
+							variant={canResumeWork() ? "default" : "secondary"}
 						>
 							<LogIn className="h-4 w-4 mr-2" />
 							{loading

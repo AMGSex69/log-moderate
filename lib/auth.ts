@@ -78,12 +78,18 @@ export const authService = {
 		try {
 			console.log("🔍 Loading profile for user:", userId)
 
+			// Проверяем валидность userId
+			if (!userId || typeof userId !== 'string') {
+				console.error("❌ Invalid userId:", userId)
+				return { profile: null, error: new Error("Invalid user ID") }
+			}
+
 			// Сначала пробуем загрузить из user_profiles с офисом
 			const { data: userProfile, error: userProfileError } = await supabase
 				.from("user_profiles")
 				.select(`
 					*,
-					offices (
+					offices!user_profiles_office_id_fkey (
 						id,
 						name,
 						description
@@ -93,6 +99,12 @@ export const authService = {
 				.maybeSingle()
 
 			console.log("📊 User profile data:", userProfile, "error:", userProfileError)
+
+			// Если есть серьезная ошибка (не просто отсутствие данных), возвращаем её
+			if (userProfileError && userProfileError.code && userProfileError.code !== 'PGRST116') {
+				console.error("❌ Database error loading profile:", userProfileError)
+				return { profile: null, error: userProfileError }
+			}
 
 			if (!userProfileError && userProfile) {
 				// Добавляем проверку админа по роли, если поле роли существует
@@ -179,7 +191,7 @@ export const authService = {
 				.from("employees")
 				.select(`
 					*,
-					offices (
+					offices!employees_office_id_fkey (
 						id,
 						name,
 						description
@@ -272,10 +284,18 @@ export const authService = {
 
 			// Если ничего не найдено, создаем базовый профиль
 			console.log("🔄 No profile found, creating default profile...")
-			const { data: userData } = await supabase.auth.getUser()
+
+			let userData = null
+			try {
+				const result = await supabase.auth.getUser()
+				userData = result.data
+			} catch (error) {
+				console.warn("⚠️ Could not get user data from auth:", error)
+			}
+
 			const defaultProfile: UserProfile = {
 				id: userId,
-				full_name: userData.user?.user_metadata?.full_name || userData.user?.email || "Пользователь",
+				full_name: userData?.user?.user_metadata?.full_name || userData?.user?.email || "Пользователь",
 				position: "Сотрудник",
 				is_admin: false,
 				role: 'user',
@@ -295,6 +315,33 @@ export const authService = {
 			}
 
 			console.log("✅ Default profile created:", defaultProfile)
+
+			// Пытаемся создать профиль в базе данных для будущих загрузок
+			try {
+				console.log("💾 Attempting to save default profile to database...")
+				const { error: insertError } = await supabase
+					.from("user_profiles")
+					.insert({
+						id: userId,
+						full_name: defaultProfile.full_name,
+						position: defaultProfile.position,
+						is_admin: false,
+						work_schedule: defaultProfile.work_schedule,
+						work_hours: defaultProfile.work_hours,
+						is_online: false,
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString()
+					})
+
+				if (insertError) {
+					console.warn("⚠️ Could not save default profile:", insertError)
+				} else {
+					console.log("✅ Default profile saved to database")
+				}
+			} catch (saveError) {
+				console.warn("⚠️ Error saving default profile:", saveError)
+			}
+
 			return { profile: defaultProfile, error: null }
 		} catch (error) {
 			console.error("❌ Error loading user profile:", error)
@@ -305,38 +352,151 @@ export const authService = {
 	// Обновить профиль
 	async updateProfile(userId: string, updates: Partial<UserProfile>) {
 		try {
-			// Пробуем обновить в user_profiles
-			const { data: userProfileData, error: userProfileError } = await supabase
+			console.log("🔄 [AUTH] Starting profile update for user:", userId)
+			console.log("📝 [AUTH] Updates to apply:", updates)
+
+			// Убираем undefined значения
+			const cleanUpdates = Object.fromEntries(
+				Object.entries(updates).filter(([key, value]) => value !== undefined)
+			)
+
+			console.log("🧹 [AUTH] Cleaned updates:", cleanUpdates)
+
+			// Сначала пробуем создать запись в user_profiles если её нет
+			const { data: existingProfile, error: checkError } = await supabase
 				.from("user_profiles")
-				.update(updates)
+				.select("id")
 				.eq("id", userId)
-				.select()
 				.maybeSingle()
 
-			if (!userProfileError && userProfileData) {
-				return { data: userProfileData, error: null }
+			console.log("🔍 [AUTH] Existing profile check:", { existingProfile, checkError })
+
+			if (!existingProfile && (!checkError || checkError.code === 'PGRST116')) {
+				// Пользователь не найден, создаем базовую запись
+				console.log("👤 [AUTH] Creating new user profile...")
+
+				const baseProfile = {
+					id: userId,
+					full_name: cleanUpdates.full_name || "Пользователь",
+					position: cleanUpdates.position || "Сотрудник",
+					is_admin: false,
+					work_schedule: cleanUpdates.work_schedule || "5/2",
+					work_hours: cleanUpdates.work_hours || 9,
+					is_online: false,
+					avatar_url: cleanUpdates.avatar_url || null,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				}
+
+				const { data: newProfile, error: insertError } = await supabase
+					.from("user_profiles")
+					.insert(baseProfile)
+					.select()
+					.single()
+
+				console.log("📝 [AUTH] Profile creation result:", { newProfile, insertError })
+
+				if (!insertError) {
+					return { data: newProfile, error: null }
+				} else {
+					console.warn("⚠️ [AUTH] Failed to create profile, trying employee update...")
+				}
+			}
+
+			// Пробуем обновить в user_profiles
+			let userProfileError = null
+			if (Object.keys(cleanUpdates).length > 0) {
+				console.log("🔄 [AUTH] Attempting user_profiles update...")
+
+				const updateData = {
+					...cleanUpdates,
+					updated_at: new Date().toISOString()
+				}
+
+				const { data: userProfileData, error: updateError } = await supabase
+					.from("user_profiles")
+					.update(updateData)
+					.eq("id", userId)
+					.select()
+					.maybeSingle()
+
+				userProfileError = updateError
+				console.log("📊 [AUTH] User profiles update result:", { userProfileData, userProfileError })
+
+				if (!userProfileError && userProfileData) {
+					console.log("✅ [AUTH] Successfully updated user_profiles")
+					return { data: userProfileData, error: null }
+				} else {
+					console.warn("⚠️ [AUTH] User profiles update failed:", userProfileError)
+				}
 			}
 
 			// Если user_profiles не работает, пробуем employees
-			console.log("🔄 Updating employee profile...")
+			console.log("🔄 [AUTH] Trying employees table...")
+
+			// Создаем объект обновления для employees
+			const employeeUpdates: any = {
+				updated_at: new Date().toISOString(),
+			}
+
+			// Добавляем только валидные поля
+			if (cleanUpdates.full_name) employeeUpdates.full_name = cleanUpdates.full_name
+			if (cleanUpdates.position) employeeUpdates.position = cleanUpdates.position
+			if (cleanUpdates.work_schedule) employeeUpdates.work_schedule = cleanUpdates.work_schedule
+			if (cleanUpdates.work_hours) employeeUpdates.work_hours = cleanUpdates.work_hours
+			if (cleanUpdates.is_online !== undefined) employeeUpdates.is_online = cleanUpdates.is_online
+			if (cleanUpdates.last_seen) employeeUpdates.last_seen = cleanUpdates.last_seen
+			if (cleanUpdates.avatar_url) employeeUpdates.avatar_url = cleanUpdates.avatar_url
+
+			// Если обновляется office_name, находим и обновляем office_id
+			if (cleanUpdates.office_name) {
+				console.log("🏢 [AUTH] Updating office for employee, office_name:", cleanUpdates.office_name)
+
+				try {
+					const { data: officeData, error: officeError } = await supabase
+						.from("offices")
+						.select("id")
+						.eq("name", cleanUpdates.office_name)
+						.maybeSingle()
+
+					console.log("🏢 [AUTH] Office lookup result:", { officeData, officeError })
+
+					if (!officeError && officeData) {
+						employeeUpdates.office_id = officeData.id
+						console.log("✅ [AUTH] Found office_id:", officeData.id)
+					} else {
+						console.warn("⚠️ [AUTH] Office not found:", cleanUpdates.office_name)
+					}
+				} catch (officeErr) {
+					console.error("❌ [AUTH] Office lookup error:", officeErr)
+				}
+			}
+
+			console.log("📝 [AUTH] Employee updates to apply:", employeeUpdates)
+
 			const { data: employeeData, error: employeeError } = await supabase
 				.from("employees")
-				.update({
-					full_name: updates.full_name,
-					position: updates.position,
-					work_schedule: updates.work_schedule,
-					work_hours: updates.work_hours,
-					is_online: updates.is_online,
-					last_seen: updates.last_seen,
-					updated_at: new Date().toISOString(),
-				})
+				.update(employeeUpdates)
 				.eq("user_id", userId)
 				.select()
 				.maybeSingle()
 
-			return { data: employeeData, error: employeeError }
+			console.log("📊 [AUTH] Employee update result:", { employeeData, employeeError })
+
+			if (!employeeError && employeeData) {
+				console.log("✅ [AUTH] Successfully updated employees")
+				return { data: employeeData, error: null }
+			}
+
+			// Если ничего не получилось, возвращаем последнюю ошибку
+			console.error("❌ [AUTH] All update attempts failed")
+			return {
+				data: null,
+				error: employeeError || userProfileError || new Error("Failed to update profile in any table")
+			}
+
 		} catch (error) {
-			console.error("❌ Error updating profile:", error)
+			console.error("❌ [AUTH] Critical error updating profile:", error)
 			return { data: null, error }
 		}
 	},

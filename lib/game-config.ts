@@ -43,7 +43,7 @@ export const GAME_CONFIG = {
 
 		// Офисные задачи
 		'Входящие звонки': 3,  // за каждый звонок
-		'Курьер ЭД (кол-во физ.Лиц)': 2,  // за каждое физ.лицо
+		'Курьер ЭД (кол-во физ.Лиц)': 2,  // за каждое физ
 		'Обзвоны': 4,  // за каждый звонок
 		'Плакаты': 8,
 		'Скрипты': 12,
@@ -90,7 +90,7 @@ export const GAME_CONFIG = {
 		oss_surveys: {
 			name: 'ОСС и Опросы',
 			icon: '📊',
-			color: '#10B981', // emerald
+			color: '#10B981', // green
 			tasks: [
 				'Актуализация юрзначимых опросов + публикация протоколов',
 				'Модерация опросов',
@@ -104,7 +104,7 @@ export const GAME_CONFIG = {
 		support: {
 			name: 'Поддержка/Прочее',
 			icon: '🛠️',
-			color: '#F59E0B', // amber
+			color: '#6366F1', // indigo
 			tasks: [
 				'АСГУФ',
 				'Валидация',
@@ -114,10 +114,10 @@ export const GAME_CONFIG = {
 				'Статистика ОСС'
 			]
 		},
-		mgji: {
+		mzhi: {
 			name: 'МЖИ',
 			icon: '🏛️',
-			color: '#EF4444', // red
+			color: '#8B5CF6', // violet
 			tasks: [
 				'Внесение решений МЖИ (кол-во бланков)',
 				'Проверка протоколов МЖИ',
@@ -126,7 +126,7 @@ export const GAME_CONFIG = {
 		},
 		office: {
 			name: 'Офисные задачи',
-			icon: '💼',
+			icon: '📞',
 			color: '#06B6D4', // cyan
 			tasks: [
 				'Входящие звонки',
@@ -137,10 +137,10 @@ export const GAME_CONFIG = {
 				'Работа с посетителями'
 			]
 		},
-		walkthroughs: {
+		field_work: {
 			name: 'Обходы',
 			icon: '🚶',
-			color: '#84CC16', // lime
+			color: '#059669', // emerald
 			tasks: [
 				'Заполнение карточек домов после обходов',
 				'Обходы',
@@ -164,16 +164,80 @@ export const GAME_CONFIG = {
 		tasks: string[]
 	}>,
 
-	// Пороги для получения призов (общие очки)
-	PRIZE_THRESHOLDS: {
-		bronze: 100,      // Бронзовый уровень
-		silver: 300,      // Серебряный уровень  
-		gold: 600,        // Золотой уровень
-		platinum: 1000,   // Платиновый уровень
-		diamond: 1500,    // Алмазный уровень
-		master: 2500,     // Мастер уровень
-		grandmaster: 5000 // Гранд мастер
-	} as Record<string, number>,
+	// Новая система уровней (100 уровней с прогрессивным увеличением)
+	LEVELS: (() => {
+		const levels = []
+		let requiredCoins = 0
+
+		for (let level = 1; level <= 100; level++) {
+			// Прогрессивная формула: каждый уровень требует больше очков
+			// 1-10: 50, 100, 200, 350, 550, 800, 1100, 1450, 1850, 2300
+			// 11-20: +600, +650, +700... (увеличивается на 50 каждый уровень)
+			// 21-50: еще быстрее
+			// 51-100: очень быстро растет
+
+			let increment
+			if (level <= 10) {
+				increment = 50 + (level - 1) * 50 + Math.pow(level - 1, 2) * 25
+			} else if (level <= 20) {
+				increment = 600 + (level - 11) * 50
+			} else if (level <= 50) {
+				increment = 1100 + (level - 21) * 100 + Math.pow(level - 21, 2) * 10
+			} else if (level <= 80) {
+				increment = 5000 + (level - 51) * 200 + Math.pow(level - 51, 2) * 20
+			} else {
+				increment = 15000 + (level - 81) * 500 + Math.pow(level - 81, 2) * 50
+			}
+
+			requiredCoins += increment
+
+			// Названия уровней
+			let title, icon
+			if (level <= 5) {
+				title = `Новичок ${level}`
+				icon = '🌱'
+			} else if (level <= 10) {
+				title = `Стажер ${level - 5}`
+				icon = '📚'
+			} else if (level <= 20) {
+				title = `Работник ${level - 10}`
+				icon = '💼'
+			} else if (level <= 30) {
+				title = `Специалист ${level - 20}`
+				icon = '🔧'
+			} else if (level <= 40) {
+				title = `Эксперт ${level - 30}`
+				icon = '🎯'
+			} else if (level <= 50) {
+				title = `Мастер ${level - 40}`
+				icon = '⚡'
+			} else if (level <= 60) {
+				title = `Виртуоз ${level - 50}`
+				icon = '🎨'
+			} else if (level <= 70) {
+				title = `Гений ${level - 60}`
+				icon = '🧠'
+			} else if (level <= 80) {
+				title = `Легенда ${level - 70}`
+				icon = '🏆'
+			} else if (level <= 90) {
+				title = `Титан ${level - 80}`
+				icon = '💎'
+			} else {
+				title = `Бог ${level - 90}`
+				icon = '👑'
+			}
+
+			levels.push({
+				level,
+				min_coins: requiredCoins,
+				title,
+				icon
+			})
+		}
+
+		return levels
+	})(),
 
 	// Бонусы за эффективность (коэффициенты)
 	EFFICIENCY_BONUSES: {
@@ -289,58 +353,40 @@ export function calculateTaskReward(taskName: string, unitsCompleted: number, ti
 	return Math.round(totalReward)
 }
 
-export function getPrizeLevel(totalPoints: number): string {
-	const thresholds = GAME_CONFIG.PRIZE_THRESHOLDS
-
-	if (totalPoints >= thresholds.grandmaster) return 'grandmaster'
-	if (totalPoints >= thresholds.master) return 'master'
-	if (totalPoints >= thresholds.diamond) return 'diamond'
-	if (totalPoints >= thresholds.platinum) return 'platinum'
-	if (totalPoints >= thresholds.gold) return 'gold'
-	if (totalPoints >= thresholds.silver) return 'silver'
-	if (totalPoints >= thresholds.bronze) return 'bronze'
-
-	return 'novice'
-}
-
-// Функции для расчета уровня пользователя
+// Функции для расчета уровня пользователя (новая система)
 export function calculateLevel(coins: number): { level: number; name: string; icon: string; minCoins: number } {
-	const thresholds = GAME_CONFIG.PRIZE_THRESHOLDS
+	const levels = GAME_CONFIG.LEVELS
 
-	if (coins >= thresholds.grandmaster) return { level: 7, name: 'Гранд-мастер', icon: '👑', minCoins: thresholds.grandmaster }
-	if (coins >= thresholds.master) return { level: 6, name: 'Мастер', icon: '🏆', minCoins: thresholds.master }
-	if (coins >= thresholds.diamond) return { level: 5, name: 'Алмаз', icon: '💎', minCoins: thresholds.diamond }
-	if (coins >= thresholds.platinum) return { level: 4, name: 'Платина', icon: '🥇', minCoins: thresholds.platinum }
-	if (coins >= thresholds.gold) return { level: 3, name: 'Золото', icon: '🥈', minCoins: thresholds.gold }
-	if (coins >= thresholds.silver) return { level: 2, name: 'Серебро', icon: '🥉', minCoins: thresholds.silver }
-	if (coins >= thresholds.bronze) return { level: 1, name: 'Бронза', icon: '🏅', minCoins: thresholds.bronze }
+	// Ищем подходящий уровень (идем с конца)
+	for (let i = levels.length - 1; i >= 0; i--) {
+		if (coins >= levels[i].min_coins) {
+			return {
+				level: levels[i].level,
+				name: levels[i].title,
+				icon: levels[i].icon,
+				minCoins: levels[i].min_coins
+			}
+		}
+	}
 
+	// Если очков меньше, чем для 1 уровня
 	return { level: 0, name: 'Новичок', icon: '🌱', minCoins: 0 }
 }
 
 export function getNextLevel(coins: number): { level: number; threshold: number; name: string; minCoins: number; icon: string } | null {
-	const thresholds = GAME_CONFIG.PRIZE_THRESHOLDS
+	const levels = GAME_CONFIG.LEVELS
 
-	if (coins < thresholds.bronze) {
-		return { level: 1, threshold: thresholds.bronze, name: 'Бронза', minCoins: thresholds.bronze, icon: '🏅' }
-	}
-	if (coins < thresholds.silver) {
-		return { level: 2, threshold: thresholds.silver, name: 'Серебро', minCoins: thresholds.silver, icon: '🥉' }
-	}
-	if (coins < thresholds.gold) {
-		return { level: 3, threshold: thresholds.gold, name: 'Золото', minCoins: thresholds.gold, icon: '🥈' }
-	}
-	if (coins < thresholds.platinum) {
-		return { level: 4, threshold: thresholds.platinum, name: 'Платина', minCoins: thresholds.platinum, icon: '🥇' }
-	}
-	if (coins < thresholds.diamond) {
-		return { level: 5, threshold: thresholds.diamond, name: 'Алмаз', minCoins: thresholds.diamond, icon: '💎' }
-	}
-	if (coins < thresholds.master) {
-		return { level: 6, threshold: thresholds.master, name: 'Мастер', minCoins: thresholds.master, icon: '🏆' }
-	}
-	if (coins < thresholds.grandmaster) {
-		return { level: 7, threshold: thresholds.grandmaster, name: 'Гранд-мастер', minCoins: thresholds.grandmaster, icon: '👑' }
+	// Ищем следующий уровень
+	for (const levelData of levels) {
+		if (coins < levelData.min_coins) {
+			return {
+				level: levelData.level,
+				threshold: levelData.min_coins,
+				name: levelData.title,
+				minCoins: levelData.min_coins,
+				icon: levelData.icon
+			}
+		}
 	}
 
 	// Максимальный уровень достигнут
