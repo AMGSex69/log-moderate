@@ -160,6 +160,31 @@ export default function ProfilePage() {
 		}
 	}, [profileData.avatar_url, profileData.full_name, profileData.position, profileData.office_name])
 
+	// useEffect для периодического обновления статистики
+	useEffect(() => {
+		if (!user) return
+
+		const interval = setInterval(async () => {
+			console.log("🔄 [PROFILE-AUTO-UPDATE] Автоматическое обновление статистики профиля")
+
+			// Получаем актуальные монеты из базы
+			const { data: userProfileData } = await supabase
+				.from("user_profiles")
+				.select("coins, level")
+				.eq("id", user.id)
+				.single()
+
+			if (userProfileData) {
+				setStats(prev => ({
+					...prev,
+					total_coins: userProfileData.coins || 0
+				}))
+			}
+		}, 5000) // Обновляем каждые 5 секунд
+
+		return () => clearInterval(interval)
+	}, [user])
+
 	// Слушатель изменений офиса из админки
 	useEffect(() => {
 		if (!user) return
@@ -265,6 +290,7 @@ export default function ProfilePage() {
 			// В любом случае обновляем данные
 			await fetchProfileInfo()
 			await fetchOfficeStats()
+			await fetchUserStats() // Обновляем статистику
 			refreshUserData()
 
 		} catch (error) {
@@ -276,6 +302,8 @@ export default function ProfilePage() {
 			})
 		}
 	}
+
+
 
 	const fetchUserStats = async () => {
 		const { employeeId, error: empError } = await authService.getEmployeeId(user!.id)
@@ -1077,6 +1105,8 @@ export default function ProfilePage() {
 											</div>
 										</div>
 									</div>
+
+
 
 									{/* Кнопка редактирования */}
 									<PixelButton

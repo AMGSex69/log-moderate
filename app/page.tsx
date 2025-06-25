@@ -824,6 +824,22 @@ export default function Home() {
 			// Обновляем кэш монет
 			appCache.set(`player_coins_${user.id}`, newTotalCoins, 10)
 
+			// ВАЖНО: Сохраняем монеты в базу данных
+			try {
+				const { error: updateError } = await supabase
+					.from("user_profiles")
+					.update({ coins: newTotalCoins })
+					.eq("id", user.id)
+
+				if (updateError) {
+					console.error("❌ Ошибка обновления монет в БД:", updateError)
+				} else {
+					console.log("✅ Монеты обновлены в БД:", newTotalCoins)
+				}
+			} catch (error) {
+				console.error("❌ Ошибка сохранения монет:", error)
+			}
+
 			const timeFormatted = `${Math.floor(elapsedMinutes / 60)}:${(elapsedMinutes % 60).toString().padStart(2, '0')}`
 
 			toast({
@@ -1044,6 +1060,22 @@ export default function Home() {
 
 			// Обновляем кэш монет
 			appCache.set(`player_coins_${user!.id}`, newTotalCoins, 10)
+
+			// ВАЖНО: Сохраняем монеты в базу данных
+			try {
+				const { error: updateError } = await supabase
+					.from("user_profiles")
+					.update({ coins: newTotalCoins })
+					.eq("id", user!.id)
+
+				if (updateError) {
+					console.error("❌ Ошибка обновления монет в БД (постфактум):", updateError)
+				} else {
+					console.log("✅ Монеты обновлены в БД (постфактум):", newTotalCoins)
+				}
+			} catch (error) {
+				console.error("❌ Ошибка сохранения монет (постфактум):", error)
+			}
 
 			// Обновляем статистику
 			fetchLeaderboard()
