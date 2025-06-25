@@ -163,9 +163,10 @@ export default function EnhancedDashboardV2() {
 	const loadEmployees = async () => {
 		try {
 			// Используем новую функцию для получения сотрудников с учетом прав
-			const { data, error } = await supabase.rpc('get_employees_for_admin', {
-				requesting_user_uuid: user!.id
-			})
+			const { data, error } = await supabase
+				.from('user_profiles')
+				.select('*')
+				.not('employee_id', 'is', null) // Получаем всех пользователей с employee_id
 
 			if (error) throw error
 
@@ -489,7 +490,7 @@ export default function EnhancedDashboardV2() {
 				.from("work_sessions")
 				.select(`
           *, 
-          employees!inner(full_name, position)
+          user_profiles!inner(full_name, position)
         `)
 				.gte("date", start)
 				.lte("date", end)
@@ -501,7 +502,7 @@ export default function EnhancedDashboardV2() {
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name),
+          user_profiles!inner(full_name),
           task_types!inner(name)
         `)
 				.gte("work_date", start)
@@ -545,7 +546,7 @@ export default function EnhancedDashboardV2() {
 
 				workdaysMap.set(key, {
 					employee_id: session.employee_id,
-					full_name: session.employees.full_name,
+					full_name: session.user_profiles.full_name,
 					date: session.date,
 					clock_in_time: session.clock_in_time,
 					clock_out_time: session.clock_out_time,
@@ -570,7 +571,7 @@ export default function EnhancedDashboardV2() {
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name, position),
+          user_profiles!inner(full_name, position),
           task_types!inner(name)
         `)
 				.gte("work_date", start)
@@ -590,8 +591,8 @@ export default function EnhancedDashboardV2() {
 				const employeeId = log.employee_id
 				const existing = statsMap.get(employeeId) || {
 					employee_id: employeeId,
-					full_name: log.employees.full_name,
-					position: log.employees.position,
+					full_name: log.user_profiles.full_name,
+					position: log.user_profiles.position,
 					period_stats: {
 						total_tasks: 0,
 						total_units: 0,
@@ -649,7 +650,7 @@ export default function EnhancedDashboardV2() {
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name),
+          user_profiles!inner(full_name),
           task_types!inner(name)
         `)
 				.gte("work_date", start)
@@ -680,13 +681,13 @@ export default function EnhancedDashboardV2() {
 				existing.total_time += log.time_spent_minutes
 
 				// Обновляем топ исполнителей
-				const performer = existing.top_performers.find(p => p.name === log.employees.full_name)
+				const performer = existing.top_performers.find(p => p.name === log.user_profiles.full_name)
 				if (performer) {
 					performer.units += log.units_completed
 					performer.time += log.time_spent_minutes
 				} else {
 					const newPerformer = {
-						name: log.employees.full_name,
+						name: log.user_profiles.full_name,
 						units: log.units_completed,
 						time: log.time_spent_minutes
 					}
@@ -715,14 +716,15 @@ export default function EnhancedDashboardV2() {
 		try {
 			// Загружаем базовые данные
 			const { data: allEmployees } = await supabase
-				.from("employees")
-				.select("id, full_name, position, is_active")
+				.from("user_profiles")
+				.select("id, full_name, position, employee_id")
+				.not("employee_id", "is", null)
 
 			const { data: allTaskLogs } = await supabase
 				.from("task_logs")
 				.select(`
 					*,
-					employees!inner(full_name, position),
+					user_profiles!inner(full_name, position),
 					task_types!inner(name)
 				`)
 				.gte("work_date", start)
@@ -738,7 +740,7 @@ export default function EnhancedDashboardV2() {
 
 			// Основная статистика
 			const totalEmployees = allEmployees.length
-			const activeEmployees = allEmployees.filter(emp => emp.is_active).length
+			const activeEmployees = allEmployees.filter(emp => emp.employee_id).length
 			const totalTasksCompleted = allTaskLogs.length
 			const totalUnitsCompleted = allTaskLogs.reduce((sum, log) => sum + (log.units_completed || 0), 0)
 			const totalWorkTime = allTaskLogs.reduce((sum, log) => sum + (log.time_spent_minutes || 0), 0)
@@ -750,8 +752,8 @@ export default function EnhancedDashboardV2() {
 			allTaskLogs.forEach((log: any) => {
 				const empId = log.employee_id
 				const existing = employeePerformance.get(empId) || {
-					name: log.employees.full_name,
-					position: log.employees.position,
+					name: log.user_profiles.full_name,
+					position: log.user_profiles.position,
 					units: 0,
 					time: 0,
 					tasks: 0,

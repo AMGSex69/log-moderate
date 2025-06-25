@@ -143,7 +143,7 @@ export default function GeneralDashboard() {
 
   const fetchGeneralStats = async (start: string, end: string, today: string): Promise<DashboardStats> => {
     // Общее количество активных сотрудников
-    const { data: employees } = await supabase.from("employees").select("id").eq("is_active", true)
+    const { data: employees } = await supabase.from("user_profiles").select("id").not("employee_id", "is", null)
 
     // Активные сотрудники сегодня (с задачами или рабочими сессиями)
     const { data: todayActive } = await supabase.from("task_logs").select("employee_id").eq("work_date", today)
@@ -198,7 +198,7 @@ export default function GeneralDashboard() {
     // Получаем имена сотрудников
     if (employeeStats.size > 0) {
       const { data: employeeNames } = await supabase
-        .from("employees")
+        .from("user_profiles")
         .select("id, full_name")
         .in("id", Array.from(employeeStats.keys()))
 
@@ -261,7 +261,7 @@ export default function GeneralDashboard() {
   const fetchTopPerformers = async (start: string, end: string): Promise<TopPerformer[]> => {
     const { data: logs } = await supabase
       .from("task_logs")
-      .select("employee_id, units_completed, time_spent_minutes, task_types(name), employees(full_name)")
+      .select("employee_id, units_completed, time_spent_minutes, task_types(name), user_profiles(full_name)")
       .gte("work_date", start)
       .lte("work_date", end)
 
@@ -271,7 +271,7 @@ export default function GeneralDashboard() {
       const employeeId = log.employee_id
       const existing = performerMap.get(employeeId) || {
         employee_id: employeeId,
-        full_name: log.employees.full_name,
+        full_name: log.user_profiles.full_name,
         total_tasks: 0,
         total_units: 0,
         total_time: 0,

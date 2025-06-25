@@ -143,6 +143,13 @@ export default function Home() {
 		if (!authLoading && user && profile && !initializingRef.current) {
 			console.log("🚀 Starting data initialization...")
 			initializingRef.current = true
+
+			// Сразу устанавливаем монеты из профиля
+			if (profile.coins !== undefined) {
+				setPlayerCoins(profile.coins)
+				console.log("🪙 Player coins set from profile:", profile.coins)
+			}
+
 			initializeData()
 		} else if (!authLoading && !user) {
 			// Если нет пользователя, сразу убираем загрузку
@@ -290,41 +297,22 @@ export default function Home() {
 	}, [])
 
 	const fetchPlayerCoins = useCallback(async () => {
-		if (!user) return
+		if (!user || !profile) return
 
 		try {
-			console.log("🪙 Fetching player coins...")
-			const { employeeId, error: empError } = await authService.getEmployeeId(user.id)
-			if (empError || !employeeId) {
-				console.log("⚠️ No employee ID found")
-				return
-			}
+			console.log("🪙 Fetching player coins from profile...")
 
-			const { data: logs, error: logsError } = await supabase
-				.from("task_logs")
-				.select("units_completed, task_types!inner(name)")
-				.eq("employee_id", employeeId)
+			// Используем монеты из профиля, которые уже рассчитаны в authService
+			const coins = profile.coins || 0
 
-			if (logsError) {
-				console.error("❌ Logs error:", logsError)
-				return
-			}
-
-			let totalCoins = 0
-			logs?.forEach((log: any) => {
-				const taskName = log.task_types.name
-				const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskName] || 5
-				totalCoins += log.units_completed * coinsPerUnit
-			})
-
-			setPlayerCoins(totalCoins)
-			appCache.set(`player_coins_${user.id}`, totalCoins, 10) // Кэш на 10 минут
-			console.log("✅ Player coins loaded:", totalCoins)
+			setPlayerCoins(coins)
+			appCache.set(`player_coins_${user.id}`, coins, 10) // Кэш на 10 минут
+			console.log("✅ Player coins loaded from profile:", coins)
 		} catch (error) {
 			console.error("❌ Error loading coins:", error)
 			throw error
 		}
-	}, [user?.id])
+	}, [user?.id, profile?.coins])
 
 	const checkScheduleSetup = useCallback(() => {
 		console.log("📅 Checking schedule setup...")
@@ -348,18 +336,18 @@ export default function Home() {
 				return false
 			}
 
-			const { data: employee, error: employeeError } = await supabase
-				.from("employees")
+			const { data: userProfile, error: profileError } = await supabase
+				.from("user_profiles")
 				.select("office_id")
-				.eq("id", employeeId)
+				.eq("employee_id", employeeId)
 				.single()
 
-			if (employeeError) {
-				console.error("❌ Error checking office:", employeeError)
+			if (profileError) {
+				console.error("❌ Error checking office:", profileError)
 				return false
 			}
 
-			if (!employee?.office_id) {
+			if (!userProfile?.office_id) {
 				console.log("⚠️ Office setup needed")
 				setNeedsDistrictSetup(true)
 				return true
@@ -395,31 +383,21 @@ export default function Home() {
 			if (user) {
 				console.log("🔍 Поиск офиса пользователя:", { userId: user.id, email: user.email })
 
-				// Получаем СВЕЖИЕ данные офиса пользователя из employees (админка)
-				const { data: employeeData, error: employeeError } = await supabase
-					.from("employees")
-					.select("office_id, full_name, user_id")
-					.eq("user_id", user.id)
+				// Получаем данные офиса пользователя из user_profiles
+				const { data: profileData, error: profileError } = await supabase
+					.from("user_profiles")
+					.select("office_id, office_name, full_name")
+					.eq("id", user.id)
 					.maybeSingle()
 
-				console.log("🔄 Загружаем данные из employees (админка):", employeeData, employeeError)
+				console.log("🔄 Загружаем данные из user_profiles:", profileData, profileError)
 
-				if (employeeData?.office_id) {
-					userOfficeId = employeeData.office_id
-					console.log("🏢 User office from employees:", employeeData)
+				if (profileData?.office_id) {
+					userOfficeId = profileData.office_id
+					console.log("🏢 User office from user_profiles:", profileData)
 					console.log("🏢 НАЙДЕН ОФИС:", userOfficeId)
 				} else {
-					console.log("⚠️ Сотрудник не найден в employees, используем офис по умолчанию:", userOfficeId)
-					console.log("⚠️ Пытаемся найти в user_profiles:")
-
-					// Fallback: попробуем найти в user_profiles
-					const { data: profileData } = await supabase
-						.from("user_profiles")
-						.select("office_id, office_name")
-						.eq("id", user.id)
-						.maybeSingle()
-
-					console.log("📋 Данные из user_profiles:", profileData)
+					console.log("⚠️ Пользователь не найден в user_profiles или офис не указан, используем офис по умолчанию:", userOfficeId)
 				}
 			}
 
@@ -443,20 +421,20 @@ export default function Home() {
 				console.log("❌ Офис не найден, используем по умолчанию")
 			}
 
-			// Получаем всех сотрудников из офиса (из админки)
+			// Получаем всех сотрудников из офиса
 			const { data: allEmployees } = await supabase
-				.from("employees")
+				.from("user_profiles")
 				.select(`
+					employee_id,
 					id,
-					user_id,
 					full_name,
 					position,
 					office_id,
 					avatar_url,
-					is_active
+					is_admin
 				`)
 				.eq("office_id", userOfficeId)
-				.eq("is_active", true)
+				.not("employee_id", "is", null)
 
 			if (!allEmployees) {
 				console.error("❌ No employees found")
@@ -474,7 +452,7 @@ export default function Home() {
 					task_types!inner(name)
 				`)
 				.eq("work_date", todayStr)
-				.in("employee_id", allEmployees.map(emp => emp.id))
+				.in("employee_id", allEmployees.map(emp => emp.employee_id))
 
 			// Получаем статистику за ВСЕ ВРЕМЯ для нижней панели лидеров
 			const { data: allTimeStats } = await supabase
@@ -485,7 +463,7 @@ export default function Home() {
 					time_spent_minutes,
 					work_date
 				`)
-				.in("employee_id", allEmployees.map(emp => emp.id))
+				.in("employee_id", allEmployees.map(emp => emp.employee_id))
 
 			// Группируем статистику за СЕГОДНЯ для топ активных
 			const todayStatsMap = new Map<number, any>()
@@ -532,21 +510,21 @@ export default function Home() {
 
 			// Формируем лидерборд за ВСЕ ВРЕМЯ (для нижней панели)
 			const leaderboardData = allEmployees.map((employee: any) => {
-				const allTimeStats = allTimeStatsMap.get(employee.id) || {
+				const allTimeStats = allTimeStatsMap.get(employee.employee_id) || {
 					totalUnits: 0,
 					totalTime: 0,
 					totalTasks: 0
 				}
-				const todayStats = todayStatsMap.get(employee.id) || {
+				const todayStats = todayStatsMap.get(employee.employee_id) || {
 					totalUnits: 0,
 					totalTime: 0,
 					totalTasks: 0
 				}
-				const workDays = workDaysMap.get(employee.id)?.size || 0
+				const workDays = workDaysMap.get(employee.employee_id)?.size || 0
 
 				return {
 					name: employee.full_name,
-					userId: employee.user_id,
+					userId: employee.id, // теперь используем id из user_profiles
 					position: employee.position,
 					isOnline: false,
 					score: `${allTimeStats.totalUnits} ед. • ${workDays} дн.`,
@@ -555,7 +533,7 @@ export default function Home() {
 					totalTime: allTimeStats.totalTime,
 					workDays: workDays,
 					todayUnits: todayStats.totalUnits, // За сегодня для верхней панели
-					isCurrentUser: employee.user_id === user?.id,
+					isCurrentUser: employee.id === user?.id, // используем id из user_profiles
 					rank: 0 // Будет установлен после сортировки
 				}
 			})
@@ -578,8 +556,8 @@ export default function Home() {
 			console.log("✅ Leaderboard loaded:", leaderboardData.length, "employees from office_id:", userOfficeId)
 			console.log("👤 Current user ID:", user?.id)
 			console.log("📋 All employees in office:", allEmployees?.map(e => ({
+				employee_id: e.employee_id,
 				id: e.id,
-				user_id: e.user_id,
 				name: e.full_name,
 				office_id: e.office_id
 			})))

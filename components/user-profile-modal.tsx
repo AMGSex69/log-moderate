@@ -74,20 +74,17 @@ export default function UserProfileModal({
 
 			// Получаем данные сотрудника по user_id
 			const { data: employeeData, error: employeeError } = await supabase
-				.from("employees")
+				.from("user_profiles")
 				.select(`
           id,
           full_name,
           position,
-          user_id,
           office_id,
           work_schedule,
           work_hours,
-          is_online,
-          last_seen,
           created_at
         `)
-				.eq("user_id", userId)
+				.eq("id", userId)
 				.single()
 
 			if (employeeError || !employeeData) {
@@ -129,9 +126,9 @@ export default function UserProfileModal({
 				// Попробуем найти аватарку в таблице employees
 				console.log("🔍 Проверяем аватарку в таблице employees...")
 				const { data: employeeAvatar, error: empError } = await supabase
-					.from("employees")
+					.from("user_profiles")
 					.select("avatar_url")
-					.eq("user_id", userId)
+					.eq("id", userId)
 					.single()
 
 				console.log("📊 Результат запроса employees avatar:", { employeeAvatar, empError })
@@ -144,14 +141,14 @@ export default function UserProfileModal({
 
 			// Формируем данные профиля из данных сотрудника
 			const employeeProfileData = {
-				id: employeeData.user_id,
+				id: employeeData.id,
 				full_name: employeeData.full_name,
 				position: employeeData.position,
 				avatar_url: avatarUrl,
 				work_schedule: employeeData.work_schedule,
 				work_hours: employeeData.work_hours,
-				is_online: employeeData.is_online,
-				last_seen: employeeData.last_seen,
+				is_online: false, // Заглушка - колонка удалена после миграции
+				last_seen: undefined, // Заглушка - колонка удалена после миграции
 				created_at: employeeData.created_at,
 				office_name: officeName
 			}
@@ -214,14 +211,14 @@ export default function UserProfileModal({
 
 	const fetchUserStats = async (userId: string) => {
 		try {
-			// Получаем employee_id
-			const { data: employeeData } = await supabase
-				.from("employees")
-				.select("id")
-				.eq("user_id", userId)
+			// Получаем employee_id из user_profiles
+			const { data: userProfile } = await supabase
+				.from("user_profiles")
+				.select("employee_id")
+				.eq("id", userId)
 				.single()
 
-			if (!employeeData) return null
+			if (!userProfile?.employee_id) return null
 
 			// Получаем статистику задач
 			const { data: taskLogs } = await supabase
@@ -232,7 +229,7 @@ export default function UserProfileModal({
           work_date,
           task_types(name)
         `)
-				.eq("employee_id", employeeData.id)
+				.eq("employee_id", userProfile.employee_id)
 				.order("work_date", { ascending: false })
 
 			if (!taskLogs) return null

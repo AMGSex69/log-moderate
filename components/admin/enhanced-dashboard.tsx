@@ -141,7 +141,7 @@ export default function EnhancedDashboard() {
 				.from("work_sessions")
 				.select(`
           *, 
-          employees!inner(full_name)
+          user_profiles!inner(full_name)
         `)
 				.gte("date", start)
 				.lte("date", end)
@@ -154,7 +154,7 @@ export default function EnhancedDashboard() {
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name),
+          user_profiles!inner(full_name),
           task_types!inner(name)
         `)
 				.gte("work_date", start)
@@ -185,7 +185,7 @@ export default function EnhancedDashboard() {
 
 				workdaysMap.set(key, {
 					employee_id: session.employee_id,
-					full_name: session.employees.full_name,
+					full_name: session.user_profiles.full_name,
 					date: session.date,
 					clock_in_time: session.clock_in_time,
 					clock_out_time: session.clock_out_time,
@@ -209,7 +209,7 @@ export default function EnhancedDashboard() {
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name, position),
+          user_profiles!inner(full_name, position),
           task_types!inner(name)
         `)
 				.gte("work_date", start)
@@ -223,8 +223,8 @@ export default function EnhancedDashboard() {
 				const employeeId = log.employee_id
 				const existing = statsMap.get(employeeId) || {
 					employee_id: employeeId,
-					full_name: log.employees.full_name,
-					position: log.employees.position,
+					full_name: log.user_profiles.full_name,
+					position: log.user_profiles.position,
 					period_stats: {
 						total_tasks: 0,
 						total_units: 0,
@@ -284,7 +284,7 @@ export default function EnhancedDashboard() {
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name),
+          user_profiles!inner(full_name),
           task_types!inner(name)
         `)
 				.gte("work_date", start)
@@ -309,13 +309,13 @@ export default function EnhancedDashboard() {
 				existing.total_time += log.time_spent_minutes
 
 				// Обновляем топ исполнителей
-				const performer = existing.top_performers.find(p => p.name === log.employees.full_name)
+				const performer = existing.top_performers.find(p => p.name === log.user_profiles.full_name)
 				if (performer) {
 					performer.units += log.units_completed
 					performer.time += log.time_spent_minutes
 				} else {
 					const newPerformer = {
-						name: log.employees.full_name,
+						name: log.user_profiles.full_name,
 						units: log.units_completed,
 						time: log.time_spent_minutes
 					}

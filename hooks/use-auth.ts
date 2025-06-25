@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { useState, useEffect, createContext, useContext, useRef, useMemo } from "react"
+import { useState, useEffect, createContext, useContext, useRef, useMemo, useCallback } from "react"
 import type { User } from "@supabase/supabase-js"
 import { authService, type UserProfile } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -340,7 +340,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		}
 	}
 
-	const refreshProfile = async () => {
+	const refreshProfile = useCallback(async () => {
 		if (user) {
 			try {
 				console.log("🔄 [REFRESH] Refreshing profile from database...")
@@ -354,30 +354,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 				console.log("📊 [REFRESH] user_profiles result:", { userProfileData, userProfileError })
 
-				// Если user_profiles не работает, загружаем из employees
+				// Если user_profiles не найден, создаем базовый профиль
 				let profileSource = userProfileData
 				if (userProfileError || !userProfileData) {
-					console.log("🔄 [REFRESH] Loading from employees...")
-
-					const { data: employeeData, error: employeeError } = await supabase
-						.from("employees")
-						.select(`
-							*,
-							offices(name)
-						`)
-						.eq("user_id", user.id)
-						.maybeSingle()
-
-					console.log("📊 [REFRESH] employees result:", { employeeData, employeeError })
-
-					if (!employeeError && employeeData) {
-						// Преобразуем данные employees в формат profile
-						profileSource = {
-							...employeeData,
-							office_name: employeeData.offices?.name || employeeData.office_name || "Не указан"
-						}
-						console.log("✅ [REFRESH] Using data from employees")
+					console.log("🔄 [REFRESH] No profile found, creating default...")
+					// Создаем базовый профиль
+					profileSource = {
+						id: user.id,
+						full_name: user.email || "Пользователь",
+						position: "Сотрудник",
+						is_admin: false,
+						role: 'user',
+						work_schedule: "5/2",
+						work_hours: 9,
+						is_online: false,
+						office_name: "Рассвет",
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString()
 					}
+					console.log("✅ [REFRESH] Using default profile")
 				} else {
 					console.log("✅ [REFRESH] Using data from user_profiles")
 				}
@@ -418,7 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				setError(error.message)
 			}
 		}
-	}
+	}, [user])
 
 	const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
 		if (!user) return { error: new Error("No user logged in") }
@@ -448,7 +443,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		updateProfile: handleUpdateProfile,
 	}), [user, profile, loading, error])
 
-	// Подписка на обновления профиля через систему синхронизации (после создания refreshProfile)
+	// Подписка на обновления профиля через систему синхронизации
 	useProfileSync(user?.id || null, refreshProfile)
 
 	return React.createElement(AuthContext.Provider, { value: contextValue }, children)

@@ -110,7 +110,7 @@ export default function AdminDashboard() {
       if (error) throw error
 
       // Уникальные сотрудники
-      const { data: employees, error: empError } = await supabase.from("employees").select("id").eq("is_active", true)
+      const { data: employees, error: empError } = await supabase.from("user_profiles").select("id").eq("is_active", true)
 
       if (empError) throw empError
 
@@ -136,7 +136,7 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from("task_logs")
-        .select("employee_id, units_completed, time_spent_minutes, employees(full_name, position)")
+        .select("employee_id, units_completed, time_spent_minutes, user_profiles(full_name, position)")
         .gte("work_date", start)
         .lte("work_date", end)
 
@@ -217,7 +217,7 @@ export default function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from("task_logs")
-        .select("*, employees(full_name), task_types(name)")
+        .select("*, user_profiles(full_name), task_types(name)")
         .order("created_at", { ascending: false })
         .limit(10)
 
@@ -241,7 +241,7 @@ export default function AdminDashboard() {
       const { data, error } = await supabase
         .from("task_logs")
         .select(
-          "work_date, time_spent_minutes, units_completed, notes, employees!inner(full_name), task_types!inner(name)",
+          "work_date, time_spent_minutes, units_completed, notes, , task_types!inner(name)",
         )
         .gte("work_date", start)
         .lte("work_date", end)

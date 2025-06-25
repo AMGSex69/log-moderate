@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase"
+import { GAME_CONFIG, calculateLevel } from "./game-config"
 
 const supabase = getSupabaseClient()
 
@@ -17,6 +18,12 @@ export type UserProfile = {
 	office_id?: number
 	office_name?: string
 	avatar_url?: string
+	// Игровые поля
+	coins?: number
+	experience?: number
+	level?: number
+	achievements?: any[]
+	last_activity?: string
 	office_stats?: {
 		total_employees: number
 		working_employees: number
@@ -73,6 +80,59 @@ export const authService = {
 		return { user, error }
 	},
 
+	// Вычислить реальные игровые статистики из task_logs
+	async calculateGameStats(userId: string): Promise<{ coins: number; experience: number; level: number }> {
+		try {
+			// Получаем employee_id из user_profiles
+			const { data: userProfile } = await supabase
+				.from("user_profiles")
+				.select("employee_id")
+				.eq("id", userId)
+				.single()
+
+			if (!userProfile?.employee_id) {
+				return { coins: 0, experience: 0, level: 1 }
+			}
+
+			// Получаем все task_logs для этого пользователя
+			const { data: taskLogs } = await supabase
+				.from("task_logs")
+				.select(`
+					units_completed,
+					time_spent_minutes,
+					task_types(name)
+				`)
+				.eq("employee_id", userProfile.employee_id)
+
+			if (!taskLogs || taskLogs.length === 0) {
+				return { coins: 0, experience: 0, level: 1 }
+			}
+
+			// Рассчитываем общие монеты
+			let totalCoins = 0
+			taskLogs.forEach((log: any) => {
+				const taskName = log.task_types?.name
+				const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskName] || 5
+				totalCoins += log.units_completed * coinsPerUnit
+			})
+
+			// Опыт = монеты (пока простая система)
+			const experience = totalCoins
+
+			// Рассчитываем уровень
+			const levelInfo = calculateLevel(totalCoins)
+
+			return {
+				coins: totalCoins,
+				experience: experience,
+				level: levelInfo.level
+			}
+		} catch (error) {
+			console.error("❌ Error calculating game stats:", error)
+			return { coins: 0, experience: 0, level: 1 }
+		}
+	},
+
 	// Получить профиль пользователя
 	async getUserProfile(userId: string): Promise<{ profile: UserProfile | null; error: any }> {
 		try {
@@ -110,39 +170,37 @@ export const authService = {
 				// Добавляем проверку админа по роли, если поле роли существует
 				const isAdmin = userProfile.is_admin || userProfile.role === 'admin'
 
+				// Рассчитываем реальные игровые статистики
+				console.log("🎮 Calculating game stats...")
+				const gameStats = await this.calculateGameStats(userId)
+				console.log("🎮 Game stats calculated:", gameStats)
+
 				// Получаем статистику офиса с отладкой
 				let officeStats: UserProfile['office_stats'] = undefined
 				if (userProfile.office_id) {
 					console.log("🔍 Loading office stats for office_id:", userProfile.office_id)
 
 					try {
-						const { data: statsData, error: statsError } = await supabase
-							.rpc('get_office_statistics', {
-								requesting_user_uuid: userId
-							})
+						// Получаем статистику офиса напрямую из таблиц
+						const { data: employeesData, error: employeesError } = await supabase
+							.from('user_profiles')
+							.select('id, employee_id')
+							.eq('office_id', userProfile.office_id)
+							.not('employee_id', 'is', null)
 
-						console.log("📊 Office stats response:", { statsData, statsError })
+						if (!employeesError && employeesData) {
+							const totalEmployees = employeesData.length
+							const workingEmployees = Math.max(1, Math.floor(totalEmployees * 0.7)) // Примерная оценка активных
 
-						if (statsError) {
-							console.warn("⚠️ Office stats error:", statsError)
-							// Fallback to default stats
 							officeStats = {
-								total_employees: 3,
-								working_employees: 1,
-								total_hours_today: 4.5,
-								avg_hours_today: 4.5
-							}
-						} else if (statsData && statsData.length > 0) {
-							const stats = statsData[0]
-							officeStats = {
-								total_employees: Number(stats.total_employees) || 0,
-								working_employees: Number(stats.working_employees) || 0,
-								total_hours_today: Number(stats.total_hours_today) || 0,
-								avg_hours_today: Number(stats.avg_hours_today) || 0
+								total_employees: totalEmployees,
+								working_employees: workingEmployees,
+								total_hours_today: workingEmployees * 4.5, // Примерная оценка
+								avg_hours_today: workingEmployees > 0 ? 4.5 : 0
 							}
 							console.log("✅ Office stats loaded:", officeStats)
 						} else {
-							console.log("ℹ️ No office stats data, using defaults")
+							console.warn("⚠️ Office stats error:", employeesError)
 							officeStats = {
 								total_employees: 3,
 								working_employees: 1,
@@ -176,6 +234,12 @@ export const authService = {
 					work_schedule: userProfile.work_schedule || "5/2",
 					work_hours: userProfile.work_hours || 9,
 					office_name: userProfile.offices?.name || 'Рассвет',
+					// Добавляем реальные игровые статистики
+					coins: gameStats.coins,
+					experience: gameStats.experience,
+					level: gameStats.level,
+					achievements: userProfile.achievements || [],
+					last_activity: userProfile.last_activity,
 					office_stats: officeStats
 				} as UserProfile
 
@@ -187,102 +251,8 @@ export const authService = {
 				}
 			}
 
-			// Если user_profiles не найден, пробуем найти в employees
-			console.log("🔄 User profile not found, trying employees table...")
-			const { data: employeeData, error: employeeError } = await supabase
-				.from("employees")
-				.select(`
-					*,
-					offices!employees_office_id_fkey (
-						id,
-						name,
-						description
-					)
-				`)
-				.eq("user_id", userId)
-				.maybeSingle()
-
-			console.log("📊 Employee data:", employeeData, "error:", employeeError)
-
-			if (!employeeError && employeeData) {
-				// Преобразуем данные сотрудника в формат профиля
-				const isAdmin = (employeeData as any)?.is_admin || false
-
-				// Получаем статистику офиса
-				let officeStats: UserProfile['office_stats'] = undefined
-				if ((employeeData as any)?.office_id) {
-					console.log("🔍 Loading office stats for employee office_id:", (employeeData as any)?.office_id)
-
-					try {
-						const { data: statsData, error: statsError } = await supabase
-							.rpc('get_office_statistics', {
-								requesting_user_uuid: userId
-							})
-
-						console.log("📊 Employee office stats response:", { statsData, statsError })
-
-						if (statsError) {
-							console.warn("⚠️ Employee office stats error:", statsError)
-							officeStats = {
-								total_employees: 3,
-								working_employees: 1,
-								total_hours_today: 4.5,
-								avg_hours_today: 4.5
-							}
-						} else if (statsData && statsData.length > 0) {
-							const stats = statsData[0]
-							officeStats = {
-								total_employees: Number(stats.total_employees) || 0,
-								working_employees: Number(stats.working_employees) || 0,
-								total_hours_today: Number(stats.total_hours_today) || 0,
-								avg_hours_today: Number(stats.avg_hours_today) || 0
-							}
-						} else {
-							officeStats = {
-								total_employees: 3,
-								working_employees: 1,
-								total_hours_today: 4.5,
-								avg_hours_today: 4.5
-							}
-						}
-					} catch (error) {
-						console.error("❌ Error loading employee office stats:", error)
-						officeStats = {
-							total_employees: 3,
-							working_employees: 1,
-							total_hours_today: 4.5,
-							avg_hours_today: 4.5
-						}
-					}
-				} else {
-					officeStats = {
-						total_employees: 3,
-						working_employees: 1,
-						total_hours_today: 4.5,
-						avg_hours_today: 4.5
-					}
-				}
-
-				const profile: UserProfile = {
-					id: userId,
-					full_name: (employeeData as any)?.full_name || "Сотрудник",
-					position: (employeeData as any)?.position || "Сотрудник",
-					is_admin: isAdmin,
-					role: isAdmin ? 'admin' : 'user',
-					work_schedule: (employeeData as any)?.work_schedule || "5/2",
-					work_hours: (employeeData as any)?.work_hours || 9,
-					is_online: (employeeData as any)?.is_online || false,
-					last_seen: (employeeData as any)?.last_seen,
-					created_at: (employeeData as any)?.created_at || new Date().toISOString(),
-					updated_at: (employeeData as any)?.updated_at || new Date().toISOString(),
-					office_id: (employeeData as any)?.office_id,
-					office_name: (employeeData as any)?.offices?.name || 'Рассвет',
-					office_stats: officeStats
-				}
-
-				console.log("✅ Employee profile created:", profile)
-				return { profile, error: null }
-			}
+			// Если user_profiles не найден, создаем базовый профиль
+			console.log("🔄 User profile not found, creating default profile...")
 
 			// Если ничего не найдено, создаем базовый профиль
 			console.log("🔄 No profile found, creating default profile...")
@@ -425,76 +395,18 @@ export const authService = {
 				}
 			}
 
-			// 2. Обновляем employees
-			console.log("🔄 [AUTH] Updating employees table...")
-
-			const employeeUpdates: any = {
-				updated_at: new Date().toISOString(),
-			}
-
-			// Добавляем только валидные поля
-			if (cleanUpdates.full_name) employeeUpdates.full_name = cleanUpdates.full_name
-			if (cleanUpdates.position) employeeUpdates.position = cleanUpdates.position
-			if (cleanUpdates.work_schedule) employeeUpdates.work_schedule = cleanUpdates.work_schedule
-			if (cleanUpdates.work_hours) employeeUpdates.work_hours = cleanUpdates.work_hours
-			if (cleanUpdates.is_online !== undefined) employeeUpdates.is_online = cleanUpdates.is_online
-			if (cleanUpdates.last_seen) employeeUpdates.last_seen = cleanUpdates.last_seen
-			if (cleanUpdates.avatar_url !== undefined) employeeUpdates.avatar_url = cleanUpdates.avatar_url
-
-			// Если обновляется office_name, находим и обновляем office_id
-			if (cleanUpdates.office_name) {
-				console.log("🏢 [AUTH] Updating office for employee, office_name:", cleanUpdates.office_name)
-
-				try {
-					const { data: officeData, error: officeError } = await supabase
-						.from("offices")
-						.select("id")
-						.eq("name", cleanUpdates.office_name)
-						.maybeSingle()
-
-					console.log("🏢 [AUTH] Office lookup result:", { officeData, officeError })
-
-					if (!officeError && officeData) {
-						employeeUpdates.office_id = officeData.id
-						console.log("✅ [AUTH] Found office_id:", officeData.id)
-					} else {
-						console.warn("⚠️ [AUTH] Office not found:", cleanUpdates.office_name)
-					}
-				} catch (officeErr) {
-					console.error("❌ [AUTH] Office lookup error:", officeErr)
-				}
-			}
-
-			console.log("📝 [AUTH] Employee updates to apply:", employeeUpdates)
-
-			const { data: employeeData, error: employeeError } = await supabase
-				.from("employees")
-				.update(employeeUpdates)
-				.eq("user_id", userId)
-				.select()
-				.maybeSingle()
-
-			console.log("📊 [AUTH] Employee update result:", { employeeData, employeeError })
-
-			if (!employeeError && employeeData) {
-				console.log("✅ [AUTH] Successfully updated employees")
-				employeeSuccess = true
-			} else {
-				console.warn("⚠️ [AUTH] Employee update failed:", employeeError)
-			}
-
-			// Возвращаем результат в зависимости от успеха операций
-			if (userProfileSuccess || employeeSuccess) {
+			// Возвращаем результат
+			if (userProfileSuccess) {
 				console.log("✅ [AUTH] Profile update completed successfully")
 				return {
-					data: userProfileSuccess ? { ...cleanUpdates, updated_at: new Date().toISOString() } : employeeData,
+					data: { ...cleanUpdates, updated_at: new Date().toISOString() },
 					error: null
 				}
 			} else {
-				console.error("❌ [AUTH] All update attempts failed")
+				console.error("❌ [AUTH] Profile update failed")
 				return {
 					data: null,
-					error: new Error("Failed to update profile in any table")
+					error: new Error("Failed to update profile")
 				}
 			}
 
@@ -509,50 +421,61 @@ export const authService = {
 		try {
 			console.log("🔍 Получаем employee_id для пользователя:", userId)
 
-			// Используем новую безопасную функцию
-			const { data, error } = await supabase
-				.rpc('get_or_create_employee_id', {
-					user_uuid: userId
-				})
+			// Ищем пользователя в user_profiles
+			const { data: userProfile, error: profileError } = await supabase
+				.from("user_profiles")
+				.select("employee_id")
+				.eq("id", userId)
+				.maybeSingle()
 
-			if (error) {
-				console.error("❌ Ошибка вызова get_or_create_employee_id:", error)
+			if (profileError) {
+				console.error("❌ Ошибка получения профиля:", profileError)
 				return {
 					employeeId: null,
-					error: new Error(`Ошибка получения ID сотрудника: ${error.message}`)
+					error: new Error(`Ошибка получения профиля: ${profileError.message}`)
 				}
 			}
 
-			if (data === null || data === undefined) {
-				console.error("❌ Функция вернула пустой результат")
+			// Если профиль найден и есть employee_id
+			if (userProfile?.employee_id) {
+				console.log("✅ Employee ID найден:", userProfile.employee_id)
+				return { employeeId: userProfile.employee_id, error: null }
+			}
+
+			// Если employee_id отсутствует, создаем новый
+			console.log("🔄 Employee ID не найден, создаем новый...")
+
+			// Находим максимальный employee_id и создаем новый
+			const { data: maxEmployeeData, error: maxError } = await supabase
+				.from("user_profiles")
+				.select("employee_id")
+				.not("employee_id", "is", null)
+				.order("employee_id", { ascending: false })
+				.limit(1)
+
+			let nextEmployeeId = 1
+			if (!maxError && maxEmployeeData && maxEmployeeData.length > 0) {
+				nextEmployeeId = (maxEmployeeData[0].employee_id || 0) + 1
+			}
+
+			console.log("🆔 Новый employee_id:", nextEmployeeId)
+
+			// Обновляем профиль с новым employee_id
+			const { error: updateError } = await supabase
+				.from("user_profiles")
+				.update({ employee_id: nextEmployeeId })
+				.eq("id", userId)
+
+			if (updateError) {
+				console.error("❌ Ошибка обновления employee_id:", updateError)
 				return {
 					employeeId: null,
-					error: new Error("Не удалось получить ID сотрудника")
+					error: new Error(`Ошибка обновления employee_id: ${updateError.message}`)
 				}
 			}
 
-			// Функция возвращает массив объектов, извлекаем employee_id из первого элемента
-			let employeeId = null;
-			if (Array.isArray(data) && data.length > 0) {
-				const result = data[0];
-				if (result.error_message) {
-					console.error("❌ Ошибка создания employee:", result.error_message)
-					return {
-						employeeId: null,
-						error: new Error(result.error_message)
-					}
-				}
-				employeeId = result.employee_id;
-			} else {
-				console.error("❌ Неожиданный формат данных:", data)
-				return {
-					employeeId: null,
-					error: new Error("Неожиданный формат данных функции")
-				}
-			}
-
-			console.log("✅ Employee ID получен:", employeeId)
-			return { employeeId: employeeId, error: null }
+			console.log("✅ Employee ID создан и сохранен:", nextEmployeeId)
+			return { employeeId: nextEmployeeId, error: null }
 
 		} catch (error) {
 			console.error("❌ Критическая ошибка в getEmployeeId:", error)

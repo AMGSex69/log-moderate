@@ -159,7 +159,7 @@ export default function TaskAnalyticsNew() {
           units_completed,
           time_spent_minutes,
           work_date,
-          employees!inner(full_name),
+          user_profiles!inner(full_name),
           task_types!inner(name)
         `)
         .gte("work_date", start)
@@ -198,7 +198,7 @@ export default function TaskAnalyticsNew() {
         const employeeId = log.employee_id
         const performerData = existing.performers.get(employeeId) || {
           employee_id: employeeId,
-          full_name: log.employees.full_name,
+          full_name: log.user_profiles.full_name,
           total_units: 0,
           total_time: 0,
         }
@@ -271,7 +271,7 @@ export default function TaskAnalyticsNew() {
           time_spent_minutes,
           work_date,
           created_at,
-          employees!inner(full_name),
+          user_profiles!inner(full_name),
           task_types!inner(name)
         `)
         .eq("task_type_id", taskId)
@@ -315,7 +315,7 @@ export default function TaskAnalyticsNew() {
         const employeeId = log.employee_id
         const existing = performerMap.get(employeeId) || {
           employee_id: employeeId,
-          full_name: log.employees.full_name,
+          full_name: log.user_profiles.full_name,
           total_count: 0,
           total_units: 0,
           total_time: 0,
@@ -437,7 +437,7 @@ export default function TaskAnalyticsNew() {
       // Отслеживаем лучшего исполнителя периода
       if (log.units_completed > existing.best_performer_units) {
         existing.best_performer_units = log.units_completed
-        existing.best_performer_name = log.employees.full_name
+        existing.best_performer_name = log.user_profiles.full_name
       }
 
       periodMap.set(periodKey, existing)

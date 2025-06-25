@@ -13,15 +13,15 @@ export class DatabaseService {
 	// Employees
 	static async getEmployeeByUserId(userId: string) {
 		return await supabase
-			.from("employees")
+			.from("user_profiles")
 			.select("*")
-			.eq("user_id", userId)
+			.eq("id", userId)
 			.single()
 	}
 
 	static async getAllEmployees() {
 		return await supabase
-			.from("employees")
+			.from("user_profiles")
 			.select("*")
 			.eq("is_active", true)
 			.order("full_name")
@@ -34,13 +34,13 @@ export class DatabaseService {
 
 		/* ОТКЛЮЧЕННЫЙ КОД:
 		return await supabase
-			.from("employees")
+			.from("user_profiles")
 			.update({
 				is_online: isOnline,
 				last_seen: new Date().toISOString(),
 				updated_at: new Date().toISOString()
 			})
-			.eq("user_id", userId)
+			.eq("id", userId)
 		*/
 	}
 
@@ -85,7 +85,7 @@ export class DatabaseService {
 	static async getTaskLogsByEmployee(employeeId: number, startDate?: string, endDate?: string) {
 		let query = supabase
 			.from("task_logs")
-			.select("*, employees(*), task_types(*)")
+			.select("*, user_profiles(*), task_types(*)")
 			.eq("employee_id", employeeId)
 			.order("created_at", { ascending: false })
 
@@ -145,7 +145,7 @@ export class DatabaseService {
 
 		return await supabase
 			.from("work_sessions")
-			.select("*, employees(*)")
+			.select("*, user_profiles(*)")
 			.eq("date", today)
 			.not("clock_in_time", "is", null)
 			.is("clock_out_time", null)
@@ -155,7 +155,7 @@ export class DatabaseService {
 	static async getActiveTaskSessions() {
 		return await supabase
 			.from("active_sessions")
-			.select("*, employees(*), task_types(*)")
+			.select("*, user_profiles(*), task_types(*)")
 			.eq("is_active", true)
 			.order("started_at", { ascending: false })
 	}
@@ -348,7 +348,7 @@ export class DatabaseService {
 	static async getTaskAnalytics(taskTypeId?: number, startDate?: string, endDate?: string) {
 		let query = supabase
 			.from("task_logs")
-			.select("*, employees(full_name), task_types(name)")
+			.select("*, user_profiles(full_name), task_types(name)")
 			.order("work_date", { ascending: false })
 
 		if (taskTypeId) query = query.eq("task_type_id", taskTypeId)
@@ -361,7 +361,7 @@ export class DatabaseService {
 	static async getEmployeeAnalytics(employeeId?: number, startDate?: string, endDate?: string) {
 		let query = supabase
 			.from("task_logs")
-			.select("*, employees(full_name, position), task_types(name)")
+			.select("*, user_profiles(full_name, position), task_types(name)")
 			.order("work_date", { ascending: false })
 
 		if (employeeId) query = query.eq("employee_id", employeeId)
@@ -381,7 +381,7 @@ export class DatabaseService {
 			{ data: periodTasks },
 			{ data: workingSessions }
 		] = await Promise.all([
-			supabase.from("employees").select("id").eq("is_active", true),
+			supabase.from("user_profiles").select("id").eq("is_active", true),
 			supabase.from("task_logs").select("*").eq("work_date", today),
 			DatabaseService.getTaskAnalytics(undefined, startDate, endDate),
 			DatabaseService.getWorkingEmployeesToday()
@@ -462,7 +462,7 @@ export class DatabaseService {
 	// Метод для получения рекомендаций по оптимизации работы
 	static async getWorkOptimizationSuggestions(employeeId: number) {
 		const { data: employee } = await supabase
-			.from("employees")
+			.from("user_profiles")
 			.select("*")
 			.eq("id", employeeId)
 			.single()

@@ -97,9 +97,9 @@ export default function OfficeTeamStats({ officeId, userId }: OfficeTeamStatsPro
 			let userOfficeId = officeId
 			if (!userOfficeId && userId) {
 				const { data: employee } = await supabase
-					.from("employees")
+					.from("user_profiles")
 					.select("office_id")
-					.eq("user_id", userId)
+					.eq("id", userId)
 					.eq("is_active", true)
 					.single()
 
@@ -115,7 +115,7 @@ export default function OfficeTeamStats({ officeId, userId }: OfficeTeamStatsPro
 
 			// Получаем всех сотрудников офиса
 			const { data: employees } = await supabase
-				.from("employees")
+				.from("user_profiles")
 				.select("id, full_name, position, is_online, user_id")
 				.eq("office_id", userOfficeId)
 				.eq("is_active", true)
@@ -127,7 +127,7 @@ export default function OfficeTeamStats({ officeId, userId }: OfficeTeamStatsPro
 				.from("task_logs")
 				.select(`
           *,
-          employees!inner(full_name, position, is_online),
+          ,
           task_types!inner(name)
         `)
 				.eq("work_date", selectedDate)

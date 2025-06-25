@@ -42,9 +42,9 @@ export default function EmployeeWorkloadChart({ employeeId }: EmployeeWorkloadCh
   const fetchEmployees = async () => {
     try {
       const { data, error } = await supabase
-        .from("employees")
+        .from("user_profiles")
         .select("id, full_name")
-        .eq("is_active", true)
+        .not("employee_id", "is", null)
         .order("full_name")
 
       if (error) throw error

@@ -68,7 +68,7 @@ export default function TaskLoggerForm() {
     try {
       // Сначала создаем или находим сотрудника
       let { data: employee, error: employeeError } = await supabase
-        .from("employees")
+        .from("user_profiles")
         .select("id")
         .eq("full_name", employeeName)
         .single()
@@ -76,7 +76,7 @@ export default function TaskLoggerForm() {
       if (employeeError && employeeError.code === "PGRST116") {
         // Сотрудник не найден, создаем нового
         const { data: newEmployee, error: createError } = await supabase
-          .from("employees")
+          .from("user_profiles")
           .insert({
             full_name: employeeName,
             email: `${employeeName.toLowerCase().replace(/\s+/g, ".")}@company.com`,

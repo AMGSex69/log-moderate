@@ -109,7 +109,7 @@ export default function TaskAnalytics() {
 
       let query = supabase
         .from("task_logs")
-        .select("employee_id, units_completed, time_spent_minutes, employees(full_name)")
+        .select("employee_id, units_completed, time_spent_minutes, user_profiles(full_name)")
 
       if (start && end) {
         query = query.eq("task_type_id", Number.parseInt(selectedTask)).gte("work_date", start).lte("work_date", end)
@@ -152,7 +152,7 @@ export default function TaskAnalytics() {
         const employeeId = log.employee_id
         const existing = employeeMap.get(employeeId) || {
           employee_id: employeeId,
-          full_name: log.employees.full_name,
+          full_name: log.user_profiles.full_name,
           total_units: 0,
           total_time: 0,
           total_tasks: 0,

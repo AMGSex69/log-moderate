@@ -44,12 +44,12 @@ export function useFreshUserData() {
 
 				// Загружаем из employees таблицы с подключением к offices
 				const { data: employeeData, error: employeeError } = await supabase
-					.from("employees")
+					.from("user_profiles")
 					.select(`
 						*,
 						offices!office_id(name)
 					`)
-					.eq("user_id", user.id)
+					.eq("id", user.id)
 					.maybeSingle()
 
 				if (!employeeError && employeeData) {

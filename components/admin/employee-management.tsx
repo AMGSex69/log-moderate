@@ -18,15 +18,17 @@ import { notifyProfileChanged, invalidateProfileCache } from "@/lib/profile-sync
 interface Employee {
 	employee_id: number
 	user_id: string
+	id: string
 	full_name: string
-	email: string
-	employee_position: string
+	email?: string
+	position: string
 	office_id: number
-	office_name: string
+	office_name?: string
+	offices?: { name: string }
 	admin_role: 'user' | 'office_admin' | 'super_admin'
 	managed_office_id?: number
 	is_admin: boolean
-	is_online: boolean
+	is_online?: boolean
 	last_seen?: string
 	created_at: string
 	work_schedule: string
@@ -121,12 +123,25 @@ export default function EmployeeManagement() {
 	const loadEmployees = async () => {
 		try {
 			setLoading(true)
-			const { data, error } = await supabase.rpc('get_employees_for_admin', {
-				requesting_user_uuid: user!.id
-			})
+			const { data, error } = await supabase
+				.from('user_profiles')
+				.select(`
+				*,
+				offices!user_profiles_office_id_fkey(name)
+			`)
+				.not('employee_id', 'is', null) // Получаем всех пользователей с employee_id
 
 			if (error) throw error
-			setEmployees(data || [])
+
+			// Обрабатываем данные для корректного отображения
+			const processedEmployees = (data || []).map(emp => ({
+				...emp,
+				user_id: emp.id,
+				office_name: emp.offices?.name || 'Не указан',
+				email: emp.id.substring(0, 8) + '...' // Показываем короткий ID
+			}))
+
+			setEmployees(processedEmployees)
 		} catch (error) {
 			console.error('Ошибка загрузки сотрудников:', error)
 			toast({
@@ -274,8 +289,8 @@ export default function EmployeeManagement() {
 
 	const filteredEmployees = employees.filter(emp =>
 		emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-		emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-		emp.office_name.toLowerCase().includes(searchTerm.toLowerCase())
+		(emp.email && emp.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+		((emp.office_name || emp.offices?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
 	)
 
 	if (loading) {
@@ -351,7 +366,7 @@ export default function EmployeeManagement() {
 						<TableHeader>
 							<TableRow>
 								<TableHead>Сотрудник</TableHead>
-								<TableHead>Email</TableHead>
+								<TableHead>ID пользователя</TableHead>
 								<TableHead>Должность</TableHead>
 								<TableHead>Офис</TableHead>
 								<TableHead>График</TableHead>
@@ -367,11 +382,11 @@ export default function EmployeeManagement() {
 										{employee.full_name || 'Без имени'}
 									</TableCell>
 									<TableCell>{employee.email}</TableCell>
-									<TableCell>{employee.employee_position}</TableCell>
+									<TableCell>{employee.position}</TableCell>
 									<TableCell>
 										<Badge variant="outline" className="gap-1">
 											<Building className="h-3 w-3" />
-											{employee.office_name}
+											{employee.office_name || employee.offices?.name || 'Не указан'}
 										</Badge>
 									</TableCell>
 									<TableCell>
@@ -384,7 +399,7 @@ export default function EmployeeManagement() {
 										{getRoleBadge(employee.admin_role)}
 									</TableCell>
 									<TableCell>
-										{getStatusBadge(employee.is_online)}
+										{getStatusBadge(employee.is_online || false)}
 									</TableCell>
 									<TableCell>
 										<Button
