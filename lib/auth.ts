@@ -80,55 +80,27 @@ export const authService = {
 		return { user, error }
 	},
 
-	// Вычислить реальные игровые статистики из task_logs
+	// Получить игровые статистики из user_profiles (НЕ рассчитывать заново)
 	async calculateGameStats(userId: string): Promise<{ coins: number; experience: number; level: number }> {
 		try {
-			// Получаем employee_id из user_profiles
+			// Получаем игровые статистики напрямую из user_profiles
 			const { data: userProfile } = await supabase
 				.from("user_profiles")
-				.select("employee_id")
+				.select("coins, experience, level")
 				.eq("id", userId)
 				.single()
 
-			if (!userProfile?.employee_id) {
+			if (!userProfile) {
 				return { coins: 0, experience: 0, level: 1 }
 			}
-
-			// Получаем все task_logs для этого пользователя
-			const { data: taskLogs } = await supabase
-				.from("task_logs")
-				.select(`
-					units_completed,
-					time_spent_minutes,
-					task_types(name)
-				`)
-				.eq("employee_id", userProfile.employee_id)
-
-			if (!taskLogs || taskLogs.length === 0) {
-				return { coins: 0, experience: 0, level: 1 }
-			}
-
-			// Рассчитываем общие монеты
-			let totalCoins = 0
-			taskLogs.forEach((log: any) => {
-				const taskName = log.task_types?.name
-				const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskName] || 5
-				totalCoins += log.units_completed * coinsPerUnit
-			})
-
-			// Опыт = монеты (пока простая система)
-			const experience = totalCoins
-
-			// Рассчитываем уровень
-			const levelInfo = calculateLevel(totalCoins)
 
 			return {
-				coins: totalCoins,
-				experience: experience,
-				level: levelInfo.level
+				coins: userProfile.coins || 0,
+				experience: userProfile.experience || 0,
+				level: userProfile.level || 1
 			}
 		} catch (error) {
-			console.error("❌ Error calculating game stats:", error)
+			console.error("❌ Error loading game stats:", error)
 			return { coins: 0, experience: 0, level: 1 }
 		}
 	},
