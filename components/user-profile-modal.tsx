@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -160,15 +160,12 @@ export default function UserProfileModal({
 			let userEmail = null
 
 			try {
-				if (currentUser?.id === userId || currentUser?.email === 'egordolgih@mail.ru') {
-					// Используем более безопасный способ получения email
-					if (currentUser?.id === userId) {
-						userEmail = currentUser.email
-					} else {
-						// Для админа попробуем получить через admin API
-						const { data: authData } = await supabase.auth.admin.getUserById(userId)
-						userEmail = authData.user?.email
-					}
+				if (currentUser?.id === userId) {
+					// Показываем email только для собственного профиля
+					userEmail = currentUser.email
+				} else {
+					// Для других пользователей email не показываем из соображений безопасности
+					userEmail = null
 				}
 			} catch (emailError) {
 				console.log("Email access restricted:", emailError)
@@ -325,6 +322,9 @@ export default function UserProfileModal({
 						<User className="h-5 w-5" />
 						ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ
 					</DialogTitle>
+					<DialogDescription>
+						Просмотр профиля и статистики пользователя
+					</DialogDescription>
 				</DialogHeader>
 
 				{loading ? (
