@@ -3,9 +3,12 @@
 import { useState, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Clock, Play, Square } from "lucide-react"
+import { Clock, Play, Square, Star, StarOff } from "lucide-react"
 import type { TaskType } from "@/lib/supabase"
 import { useActiveSessions } from "@/hooks/use-active-sessions"
+import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/hooks/use-auth"
+import { useToast } from "@/hooks/use-toast"
 
 interface TaskCardProps {
 	taskType: TaskType
@@ -13,6 +16,8 @@ interface TaskCardProps {
 	onStart: () => void
 	onStop: () => void
 	currentTime?: string
+	isFavorite?: boolean
+	onFavoriteChange?: (taskTypeId: number, isFavorite: boolean) => void
 }
 
 const taskIcons: Record<string, string> = {
@@ -33,11 +38,44 @@ const taskIcons: Record<string, string> = {
 	"Особые задачи": "⭐",
 }
 
-export default function TaskCard({ taskType, isActive, onStart, onStop, currentTime }: TaskCardProps) {
+export default function TaskCard({
+	taskType,
+	isActive,
+	onStart,
+	onStop,
+	currentTime,
+	isFavorite = false,
+	onFavoriteChange
+}: TaskCardProps) {
+	const { user } = useAuth()
+	const { toast } = useToast()
+	const [localIsFavorite, setLocalIsFavorite] = useState(isFavorite)
+	const [isToggling, setIsToggling] = useState(false)
+
+	useEffect(() => {
+		setLocalIsFavorite(isFavorite)
+	}, [isFavorite])
+
 	const formatDuration = (minutes: number) => {
 		const hours = Math.floor(minutes / 60)
 		const mins = minutes % 60
 		return hours > 0 ? `${hours}ч ${mins}м` : `${mins}м`
+	}
+
+	const toggleFavorite = async () => {
+		if (!user || isToggling || !onFavoriteChange) return
+
+		console.log('🌟 TaskCard toggleFavorite:', { taskId: taskType.id, currentState: localIsFavorite })
+
+		setIsToggling(true)
+		try {
+			// Просто уведомляем родительский компонент - он сам обработает логику
+			await onFavoriteChange(taskType.id, !localIsFavorite)
+		} catch (error) {
+			console.error('Ошибка изменения избранного:', error)
+		} finally {
+			setIsToggling(false)
+		}
 	}
 
 	return (
@@ -62,13 +100,13 @@ export default function TaskCard({ taskType, isActive, onStart, onStop, currentT
 
 				<div className="p-4 flex flex-col h-full">
 					{/* Заголовок */}
-					<div className="flex items-center justify-between mb-3">
-						<div className="flex items-center gap-3">
+					<div className="flex items-start justify-between mb-3">
+						<div className="flex items-center gap-3 flex-1">
 							{/* Иконка в пиксельной рамке */}
 							<div className="bg-white border-2 border-black p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
 								<span className="text-xl">{taskIcons[taskType.name] || "📋"}</span>
 							</div>
-							<div>
+							<div className="flex-1">
 								<h3 className="font-mono font-black text-base text-black uppercase tracking-wide drop-shadow-sm">
 									{taskType.name}
 								</h3>
@@ -78,12 +116,40 @@ export default function TaskCard({ taskType, isActive, onStart, onStop, currentT
 							</div>
 						</div>
 
-						{/* Статус бейдж */}
-						{isActive && (
-							<div className="bg-red-400 border-2 border-black px-3 py-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-								<span className="font-mono text-sm font-black text-black">АКТИВНО</span>
-							</div>
-						)}
+						{/* Правая панель с кнопками */}
+						<div className="flex flex-col items-end gap-2">
+							{/* Кнопка избранного */}
+							<button
+								onClick={toggleFavorite}
+								disabled={isToggling}
+								className={`
+									border-2 border-black rounded-none p-2
+									shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+									hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]
+									hover:translate-x-[1px] hover:translate-y-[1px]
+									transition-all duration-100
+									${localIsFavorite
+										? "bg-yellow-400 hover:bg-yellow-500"
+										: "bg-white hover:bg-gray-100"
+									}
+									${isToggling ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+								`}
+								title={localIsFavorite ? "Удалить из избранного" : "Добавить в избранное"}
+							>
+								{localIsFavorite ? (
+									<Star className="h-4 w-4 text-black fill-black" />
+								) : (
+									<StarOff className="h-4 w-4 text-black" />
+								)}
+							</button>
+
+							{/* Статус бейдж */}
+							{isActive && (
+								<div className="bg-red-400 border-2 border-black px-3 py-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+									<span className="font-mono text-sm font-black text-black">АКТИВНО</span>
+								</div>
+							)}
+						</div>
 					</div>
 
 					{/* Контейнер для динамического контента */}

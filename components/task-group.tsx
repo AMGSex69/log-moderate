@@ -14,6 +14,8 @@ interface TaskGroupProps {
 	onStartTask: (taskId: number, taskName: string) => void
 	onStopTask: (taskId: number) => void
 	getTaskTime: (taskId: number) => string | undefined
+	favoriteTasks?: number[]
+	onFavoriteChange?: (taskTypeId: number, isFavorite: boolean) => void
 }
 
 export default function TaskGroup({
@@ -25,6 +27,8 @@ export default function TaskGroup({
 	onStartTask,
 	onStopTask,
 	getTaskTime,
+	favoriteTasks = [],
+	onFavoriteChange,
 }: TaskGroupProps) {
 	const [isExpanded, setIsExpanded] = useState(true)
 
@@ -110,6 +114,8 @@ export default function TaskGroup({
 									onStart={() => onStartTask(task.id, task.name)}
 									onStop={() => onStopTask(task.id)}
 									currentTime={getTaskTime(task.id)}
+									isFavorite={favoriteTasks.includes(task.id)}
+									onFavoriteChange={onFavoriteChange}
 								/>
 							))}
 						</div>

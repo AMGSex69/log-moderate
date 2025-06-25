@@ -85,8 +85,7 @@ export default function UserProfileModal({
           work_hours,
           is_online,
           last_seen,
-          created_at,
-          offices(name)
+          created_at
         `)
 				.eq("user_id", userId)
 				.single()
@@ -95,21 +94,69 @@ export default function UserProfileModal({
 				throw new Error(`Сотрудник не найден: ${employeeError?.message || 'Неизвестная ошибка'}`)
 			}
 
+			// Получаем название офиса отдельным запросом
+			let officeName = 'Не указан'
+			if (employeeData.office_id) {
+				const { data: officeData } = await supabase
+					.from("offices")
+					.select("name")
+					.eq("id", employeeData.office_id)
+					.single()
+
+				if (officeData) {
+					officeName = officeData.name
+				}
+			}
+
+			// Получаем аватарку из user_profiles
+			let avatarUrl = null
+			console.log("🔍 Ищем аватарку для пользователя:", userId)
+
+			const { data: userProfileData, error: profileError } = await supabase
+				.from("user_profiles")
+				.select("avatar_url")
+				.eq("id", userId)
+				.single()
+
+			console.log("📊 Результат запроса user_profiles:", { userProfileData, profileError })
+
+			if (userProfileData?.avatar_url) {
+				avatarUrl = userProfileData.avatar_url
+				console.log("✅ Аватарка найдена:", avatarUrl)
+			} else {
+				console.log("⚠️ Аватарка не найдена в user_profiles. Данные:", userProfileData)
+
+				// Попробуем найти аватарку в таблице employees
+				console.log("🔍 Проверяем аватарку в таблице employees...")
+				const { data: employeeAvatar, error: empError } = await supabase
+					.from("employees")
+					.select("avatar_url")
+					.eq("user_id", userId)
+					.single()
+
+				console.log("📊 Результат запроса employees avatar:", { employeeAvatar, empError })
+
+				if (employeeAvatar?.avatar_url) {
+					avatarUrl = employeeAvatar.avatar_url
+					console.log("✅ Аватарка найдена в employees:", avatarUrl)
+				}
+			}
+
 			// Формируем данные профиля из данных сотрудника
-			const profileData = {
+			const employeeProfileData = {
 				id: employeeData.user_id,
 				full_name: employeeData.full_name,
 				position: employeeData.position,
-				avatar_url: undefined, // Пока нет в таблице employees
+				avatar_url: avatarUrl,
 				work_schedule: employeeData.work_schedule,
 				work_hours: employeeData.work_hours,
 				is_online: employeeData.is_online,
 				last_seen: employeeData.last_seen,
 				created_at: employeeData.created_at,
-				offices: employeeData.offices
+				office_name: officeName
 			}
 
-			console.log("✅ Данные пользователя загружены из employees:", profileData)
+			console.log("✅ Данные пользователя загружены из employees:", employeeProfileData)
 
 			// Получаем email из auth.users (только для супер-админа или для собственного профиля)
 			const { data: { user: currentUser } } = await supabase.auth.getUser()
@@ -138,19 +185,22 @@ export default function UserProfileModal({
 			}
 
 			const userData: UserProfileData = {
-				id: profileData.id,
-				full_name: profileData.full_name,
-				position: profileData.position,
+				id: employeeProfileData.id,
+				full_name: employeeProfileData.full_name,
+				position: employeeProfileData.position,
 				email: userEmail || undefined,
-				office_name: (profileData.offices as any)?.name || 'Не указан',
-				avatar_url: profileData.avatar_url,
-				work_schedule: profileData.work_schedule,
-				work_hours: profileData.work_hours,
-				is_online: profileData.is_online,
-				last_seen: profileData.last_seen,
-				created_at: profileData.created_at,
+				office_name: employeeProfileData.office_name,
+				avatar_url: employeeProfileData.avatar_url,
+				work_schedule: employeeProfileData.work_schedule,
+				work_hours: employeeProfileData.work_hours,
+				is_online: employeeProfileData.is_online,
+				last_seen: employeeProfileData.last_seen,
+				created_at: employeeProfileData.created_at,
 				...stats
 			}
+
+			console.log("🎯 Финальные данные пользователя:", userData)
+			console.log("🖼️ Аватарка в финальных данных:", userData.avatar_url)
 
 			setUserData(userData)
 		} catch (err: any) {

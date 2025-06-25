@@ -12,6 +12,7 @@ import { useWorkSession } from "@/hooks/use-work-session"
 import { useMultiTimer } from "@/hooks/use-multi-timer"
 import TaskGroup from "@/components/task-group"
 import ActiveTasksPanel from "@/components/active-tasks-panel"
+
 import CompletionDialog from "@/components/completion-dialog"
 import StatsPanel from "@/components/stats-panel"
 import PixelCard from "@/components/pixel-card"
@@ -53,6 +54,8 @@ export default function Home() {
 		updateUnits,
 		getFormattedTime,
 		getMinutes,
+		pauseTask,
+		resumeTask,
 		pauseAllTasks,
 		resumeAllTasks,
 	} = useMultiTimer()
@@ -73,6 +76,15 @@ export default function Home() {
 	const [localIsPaused, setLocalIsPaused] = useState(false)
 	const [showPrizeWheel, setShowPrizeWheel] = useState(false)
 	const [wonPrize, setWonPrize] = useState<Prize | null>(null)
+	const [favoriteTasks, setFavoriteTasks] = useState<{
+		task_type_id: number
+		task_name: string
+		task_group: string
+		task_icon: string
+		task_color: string
+		added_to_favorites: string
+	}[]>([])
+	const [favoriteTasksLoading, setFavoriteTasksLoading] = useState(true)
 	const [leaderboard, setLeaderboard] = useState<Array<{
 		name: string,
 		score: string,
@@ -216,6 +228,13 @@ export default function Home() {
 				})
 			)
 
+			promises.push(
+				fetchFavoriteTasks().catch((error) => {
+					console.error("❌ Favorite tasks error:", error)
+					return [] // Fallback to empty array
+				})
+			)
+
 			console.log("⏳ Waiting for data promises...")
 			await Promise.allSettled(promises)
 			console.log("✅ Data initialization complete")
@@ -228,6 +247,31 @@ export default function Home() {
 			}
 		}
 	}, [user?.id]) // Только зависимость от ID пользователя
+
+	const fetchFavoriteTasks = useCallback(async () => {
+		if (!user) return
+
+		try {
+			console.log("⭐ Fetching favorite tasks...")
+			setFavoriteTasksLoading(true)
+
+			const { data, error } = await supabase
+				.rpc('get_user_favorite_tasks')
+
+			if (error) {
+				console.error('❌ Error fetching favorite tasks:', error)
+				return
+			}
+
+			setFavoriteTasks(data || [])
+			console.log("✅ Favorite tasks loaded:", data?.length || 0)
+			console.log("📋 Favorite tasks details:", data)
+		} catch (error) {
+			console.error('❌ Error loading favorite tasks:', error)
+		} finally {
+			setFavoriteTasksLoading(false)
+		}
+	}, [user])
 
 	const fetchTaskTypes = useCallback(async () => {
 		try {
@@ -948,7 +992,39 @@ export default function Home() {
 		}
 	}
 
-	// Обработчик сохранения постфактум задачи
+	// Обработчик изменения избранных задач
+	const handleFavoriteChange = useCallback(async (taskTypeId: number, isFavorite: boolean) => {
+		try {
+			console.log('⭐ Toggling favorite:', { taskTypeId, isFavorite })
+
+			// Отправляем запрос на сервер
+			const { data, error } = await supabase.rpc('toggle_favorite_task', {
+				target_task_type_id: taskTypeId
+			})
+
+			if (error) {
+				console.error('❌ Error toggling favorite:', error)
+				return
+			}
+
+			console.log('🔄 Toggle result:', data) // data будет true если добавлено, false если удалено
+
+			// Перезагружаем список избранных задач с сервера
+			await fetchFavoriteTasks()
+
+			// Показываем уведомление
+			const taskName = taskTypes.find(t => t.id === taskTypeId)?.name || 'Задача'
+			toast({
+				title: data ? "⭐ Добавлено в избранное" : "⭐ Удалено из избранного",
+				description: `"${taskName}" ${data ? "добавлена в" : "убрана из"} избранное`,
+			})
+
+			console.log('✅ Favorite toggled and list refreshed')
+		} catch (error) {
+			console.error('❌ Error in handleFavoriteChange:', error)
+		}
+	}, [fetchFavoriteTasks])
+
 	const handleSavePostFactumTask = async (taskData: {
 		taskTypeId: number
 		taskName: string
@@ -1015,7 +1091,7 @@ export default function Home() {
 
 	// Группируем задачи по категориям - МЕМОИЗИРУЕМ
 	const groupedTasks = useMemo(() => {
-		return Object.entries(GAME_CONFIG.TASK_GROUPS)
+		const regularGroups = Object.entries(GAME_CONFIG.TASK_GROUPS)
 			.map(([groupKey, groupData]) => ({
 				key: groupKey,
 				name: groupData.name,
@@ -1024,7 +1100,29 @@ export default function Home() {
 				tasks: taskTypes.filter((task) => groupData.tasks.includes(task.name)),
 			}))
 			.filter((group) => group.tasks.length > 0) // Показываем только группы с задачами
-	}, [taskTypes])
+
+		// Создаем группу избранных из загруженных избранных задач
+		const favoriteGroup = {
+			key: 'favorites',
+			name: '⭐ ИЗБРАННЫЕ',
+			icon: '⭐',
+			color: '#FFD700',
+			tasks: favoriteTasks.map(fav => ({
+				id: fav.task_type_id,
+				name: fav.task_name,
+				group: fav.task_group,
+				icon: fav.task_icon,
+				color: fav.task_color,
+				is_active: true,
+				created_at: fav.added_to_favorites
+			}))
+		}
+
+		// Возвращаем избранные первыми, если они есть
+		return favoriteGroup.tasks.length > 0
+			? [favoriteGroup, ...regularGroups]
+			: regularGroups
+	}, [taskTypes, favoriteTasks])
 
 	// Активные задачи с таймерами для компонента - МЕМОИЗИРУЕМ
 	const activeTasksWithTimers = useMemo(() => {
@@ -1168,175 +1266,19 @@ export default function Home() {
 					<div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 						{/* Панель задач */}
 						<div className="lg:col-span-3 space-y-6">
-							{/* Панель активных задач - пиксельный стиль */}
-							{activeTasks.length > 0 ? (
-								<div className="relative">
-									<div className="
-										bg-gradient-to-br from-green-200 to-green-300
-										border-4 border-black rounded-none
-										shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
-										p-4
-									">
-										{/* Декоративные пиксели */}
-										<div className="absolute top-1 left-1 w-2 h-2 bg-yellow-400 border border-black"></div>
-										<div className="absolute top-1 right-1 w-2 h-2 bg-red-400 border border-black"></div>
-
-										<div className="flex items-center gap-3 mb-4">
-											<div className="bg-white border-2 border-black p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-												<span className="text-xl">⚡</span>
-											</div>
-											<div>
-												<h3 className="font-mono font-black text-xl text-black uppercase tracking-wide">
-													АКТИВНЫЕ ЗАДАЧИ
-												</h3>
-												<p className="font-mono text-sm text-black font-semibold">
-													{activeTasks.length} из 5 слотов заняты
-												</p>
-											</div>
-										</div>
-
-										{/* Список активных задач */}
-										<div className="space-y-3">
-											{activeTasks.map((task) => {
-												const formattedTime = getFormattedTime(task.taskTypeId)
-												const minutes = getMinutes(task.taskTypeId)
-
-												return (
-													<div
-														key={task.taskTypeId}
-														className="bg-black border-2 border-white p-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-													>
-														<div className="flex items-center justify-between">
-															<div className="flex items-center gap-3">
-																<div className="flex items-center gap-2">
-																	<div className="w-2 h-2 bg-green-400 animate-pulse"></div>
-																	<span className="font-mono font-black text-green-400 uppercase text-sm">
-																		{task.taskName}
-																	</span>
-																</div>
-
-																{/* Счетчик единиц с кнопками */}
-																<div className="flex items-center gap-1 bg-gray-800 border border-gray-600 rounded p-1">
-																	<button
-																		onClick={() => {
-																			const newUnits = Math.max(0, task.units - 1)
-																			updateUnits(task.taskTypeId, newUnits)
-																		}}
-																		disabled={task.units <= 0}
-																		className="w-6 h-6 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 border border-white text-white text-xs flex items-center justify-center"
-																	>
-																		-
-																	</button>
-
-																	<div className="flex items-center gap-1 min-w-[60px] justify-center">
-																		<input
-																			type="number"
-																			min="0"
-																			value={task.units}
-																			onChange={(e) => {
-																				const value = parseInt(e.target.value) || 0
-																				updateUnits(task.taskTypeId, value)
-																			}}
-																			className="w-10 h-6 bg-transparent text-center text-sm text-green-400 font-mono font-black border-0 outline-none"
-																		/>
-																		<span className="text-xs text-gray-400">ед</span>
-																	</div>
-
-																	<button
-																		onClick={() => {
-																			const newUnits = task.units + 1
-																			updateUnits(task.taskTypeId, newUnits)
-																		}}
-																		className="w-6 h-6 bg-green-600 hover:bg-green-700 border border-white text-white text-xs flex items-center justify-center"
-																	>
-																		+
-																	</button>
-																</div>
-															</div>
-
-															<div className="flex items-center gap-3">
-																<div className="text-right">
-																	<div className="font-mono font-black text-lg text-green-400">
-																		{formattedTime}
-																	</div>
-																	<div className="font-mono text-xs text-gray-300">
-																		{minutes} мин
-																	</div>
-																</div>
-
-																<button
-																	onClick={() => handleStopTask(task.taskTypeId)}
-																	className="
-																		bg-red-500 hover:bg-red-600 
-																		border-2 border-white rounded-none
-																		shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
-																		hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]
-																		hover:translate-x-[1px] hover:translate-y-[1px]
-																		transition-all duration-100
-																		p-2
-																	"
-																>
-																	<Square className="h-4 w-4 text-white" />
-																</button>
-															</div>
-														</div>
-													</div>
-												)
-											})}
-										</div>
-
-										{/* Подсказка */}
-										<div className="mt-4 bg-white border-2 border-black p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-											<div className="font-mono text-xs text-black text-center">
-												💡 Максимум 5 задач одновременно
-											</div>
-										</div>
-
-										{/* Нижние декоративные пиксели */}
-										<div className="absolute bottom-1 left-1 w-2 h-2 bg-green-400 border border-black"></div>
-										<div className="absolute bottom-1 right-1 w-2 h-2 bg-blue-400 border border-black"></div>
-									</div>
-									<div className="absolute inset-0 bg-black translate-x-1 translate-y-1 -z-10 rounded-none"></div>
-								</div>
-							) : (
-								<div className="relative">
-									<div className="
-										bg-gradient-to-br from-gray-200 to-gray-300
-										border-4 border-black rounded-none
-										shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]
-										p-4
-									">
-										{/* Декоративные пиксели */}
-										<div className="absolute top-1 left-1 w-2 h-2 bg-yellow-400 border border-black"></div>
-										<div className="absolute top-1 right-1 w-2 h-2 bg-red-400 border border-black"></div>
-
-										<div className="flex items-center gap-3 mb-4">
-											<div className="bg-white border-2 border-black p-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-												<span className="text-xl">⏸️</span>
-											</div>
-											<div>
-												<h3 className="font-mono font-black text-xl text-black uppercase tracking-wide">
-													АКТИВНЫЕ ЗАДАЧИ
-												</h3>
-												<p className="font-mono text-sm text-black font-semibold">
-													Нет активных задач
-												</p>
-											</div>
-										</div>
-
-										<div className="bg-black border-2 border-white p-6 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-center">
-											<div className="text-4xl mb-2">🎮</div>
-											<div className="font-mono text-white font-black">ВЫБЕРИТЕ ЗАДАЧУ</div>
-											<div className="font-mono text-gray-300 text-sm mt-1">Начните выполнение снизу</div>
-										</div>
-
-										{/* Нижние декоративные пиксели */}
-										<div className="absolute bottom-1 left-1 w-2 h-2 bg-green-400 border border-black"></div>
-										<div className="absolute bottom-1 right-1 w-2 h-2 bg-blue-400 border border-black"></div>
-									</div>
-									<div className="absolute inset-0 bg-black translate-x-1 translate-y-1 -z-10 rounded-none"></div>
-								</div>
-							)}
+							{/* Панель активных задач с индивидуальными паузами */}
+							<ActiveTasksPanel
+								activeTasks={activeTasks}
+								timers={timers}
+								onStopTask={handleStopTask}
+								onUpdateUnits={updateUnits}
+								onPauseTask={pauseTask}
+								onResumeTask={resumeTask}
+								getFormattedTime={getFormattedTime}
+								getMinutes={getMinutes}
+								isGloballyPaused={localIsPaused}
+								isOnBreak={isOnBreak}
+							/>
 
 							{/* Статус работы - пиксельный стиль */}
 							<div className="relative">
@@ -1414,6 +1356,8 @@ export default function Home() {
 									onStartTask={handleStartTask}
 									onStopTask={handleStopTask}
 									getTaskTime={getFormattedTime}
+									favoriteTasks={favoriteTasks.map(fav => fav.task_type_id)}
+									onFavoriteChange={handleFavoriteChange}
 								/>
 							))}
 						</div>
@@ -1520,6 +1464,8 @@ export default function Home() {
 								</div>
 								<div className="absolute inset-0 bg-black translate-x-1 translate-y-1 -z-10 rounded-none"></div>
 							</div>
+
+
 
 							{/* Кнопка добавления задачи постфактум */}
 							<div className="relative">
