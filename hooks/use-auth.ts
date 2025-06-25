@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js"
 import { authService, type UserProfile } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { appCache } from "@/lib/cache"
+import { useProfileSync } from "@/lib/profile-sync"
 
 interface AuthContextType {
 	user: User | null
@@ -446,6 +447,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		refreshProfile,
 		updateProfile: handleUpdateProfile,
 	}), [user, profile, loading, error])
+
+	// Подписка на обновления профиля через систему синхронизации (после создания refreshProfile)
+	useProfileSync(user?.id || null, refreshProfile)
 
 	return React.createElement(AuthContext.Provider, { value: contextValue }, children)
 }

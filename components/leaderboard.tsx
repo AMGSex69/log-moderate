@@ -52,7 +52,7 @@ export default function Leaderboard() {
 			let query = supabase
 				.from("task_logs")
 				.select(
-					"employee_id, units_completed, time_spent_minutes, task_type_id, employees(full_name, user_id, offices(name)), task_types(name)",
+					"employee_id, units_completed, time_spent_minutes, task_type_id, employees(full_name, user_id, offices!office_id(name)), task_types(name)",
 				)
 				.eq("employees.offices.name", "Рассвет")
 

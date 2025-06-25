@@ -173,6 +173,8 @@ export const authService = {
 					...userProfile,
 					is_admin: isAdmin,
 					role: userProfile.role || (isAdmin ? 'admin' : 'user'),
+					work_schedule: userProfile.work_schedule || "5/2",
+					work_hours: userProfile.work_hours || 9,
 					office_name: userProfile.offices?.name || 'Рассвет',
 					office_stats: officeStats
 				} as UserProfile
@@ -362,79 +364,70 @@ export const authService = {
 
 			console.log("🧹 [AUTH] Cleaned updates:", cleanUpdates)
 
-			// Сначала пробуем создать запись в user_profiles если её нет
-			const { data: existingProfile, error: checkError } = await supabase
-				.from("user_profiles")
-				.select("id")
-				.eq("id", userId)
-				.maybeSingle()
+			// ВАЖНО: Обновляем ОБЕ таблицы синхронно, чтобы избежать конфликтов
+			let userProfileSuccess = false
+			let employeeSuccess = false
 
-			console.log("🔍 [AUTH] Existing profile check:", { existingProfile, checkError })
-
-			if (!existingProfile && (!checkError || checkError.code === 'PGRST116')) {
-				// Пользователь не найден, создаем базовую запись
-				console.log("👤 [AUTH] Creating new user profile...")
-
-				const baseProfile = {
-					id: userId,
-					full_name: cleanUpdates.full_name || "Пользователь",
-					position: cleanUpdates.position || "Сотрудник",
-					is_admin: false,
-					work_schedule: cleanUpdates.work_schedule || "5/2",
-					work_hours: cleanUpdates.work_hours || 9,
-					is_online: false,
-					avatar_url: cleanUpdates.avatar_url || null,
-					created_at: new Date().toISOString(),
-					updated_at: new Date().toISOString()
-				}
-
-				const { data: newProfile, error: insertError } = await supabase
-					.from("user_profiles")
-					.insert(baseProfile)
-					.select()
-					.single()
-
-				console.log("📝 [AUTH] Profile creation result:", { newProfile, insertError })
-
-				if (!insertError) {
-					return { data: newProfile, error: null }
-				} else {
-					console.warn("⚠️ [AUTH] Failed to create profile, trying employee update...")
-				}
-			}
-
-			// Пробуем обновить в user_profiles
-			let userProfileError = null
+			// 1. Обновляем user_profiles
 			if (Object.keys(cleanUpdates).length > 0) {
-				console.log("🔄 [AUTH] Attempting user_profiles update...")
+				console.log("🔄 [AUTH] Updating user_profiles...")
 
 				const updateData = {
 					...cleanUpdates,
 					updated_at: new Date().toISOString()
 				}
 
-				const { data: userProfileData, error: updateError } = await supabase
+				const { data: userProfileData, error: userProfileError } = await supabase
 					.from("user_profiles")
 					.update(updateData)
 					.eq("id", userId)
 					.select()
 					.maybeSingle()
 
-				userProfileError = updateError
 				console.log("📊 [AUTH] User profiles update result:", { userProfileData, userProfileError })
 
 				if (!userProfileError && userProfileData) {
 					console.log("✅ [AUTH] Successfully updated user_profiles")
-					return { data: userProfileData, error: null }
+					userProfileSuccess = true
 				} else {
 					console.warn("⚠️ [AUTH] User profiles update failed:", userProfileError)
+
+					// Если записи нет, пробуем создать
+					if (userProfileError?.code === 'PGRST116' || !userProfileData) {
+						console.log("👤 [AUTH] Creating new user profile...")
+
+						const baseProfile = {
+							id: userId,
+							full_name: cleanUpdates.full_name || "Пользователь",
+							position: cleanUpdates.position || "Сотрудник",
+							is_admin: false,
+							work_schedule: cleanUpdates.work_schedule || "5/2",
+							work_hours: cleanUpdates.work_hours || 9,
+							is_online: false,
+							avatar_url: cleanUpdates.avatar_url || null,
+							created_at: new Date().toISOString(),
+							updated_at: new Date().toISOString()
+						}
+
+						const { data: newProfile, error: insertError } = await supabase
+							.from("user_profiles")
+							.insert(baseProfile)
+							.select()
+							.single()
+
+						console.log("📝 [AUTH] Profile creation result:", { newProfile, insertError })
+
+						if (!insertError) {
+							console.log("✅ [AUTH] Successfully created user_profiles")
+							userProfileSuccess = true
+						}
+					}
 				}
 			}
 
-			// Если user_profiles не работает, пробуем employees
-			console.log("🔄 [AUTH] Trying employees table...")
+			// 2. Обновляем employees
+			console.log("🔄 [AUTH] Updating employees table...")
 
-			// Создаем объект обновления для employees
 			const employeeUpdates: any = {
 				updated_at: new Date().toISOString(),
 			}
@@ -446,7 +439,7 @@ export const authService = {
 			if (cleanUpdates.work_hours) employeeUpdates.work_hours = cleanUpdates.work_hours
 			if (cleanUpdates.is_online !== undefined) employeeUpdates.is_online = cleanUpdates.is_online
 			if (cleanUpdates.last_seen) employeeUpdates.last_seen = cleanUpdates.last_seen
-			if (cleanUpdates.avatar_url) employeeUpdates.avatar_url = cleanUpdates.avatar_url
+			if (cleanUpdates.avatar_url !== undefined) employeeUpdates.avatar_url = cleanUpdates.avatar_url
 
 			// Если обновляется office_name, находим и обновляем office_id
 			if (cleanUpdates.office_name) {
@@ -485,14 +478,24 @@ export const authService = {
 
 			if (!employeeError && employeeData) {
 				console.log("✅ [AUTH] Successfully updated employees")
-				return { data: employeeData, error: null }
+				employeeSuccess = true
+			} else {
+				console.warn("⚠️ [AUTH] Employee update failed:", employeeError)
 			}
 
-			// Если ничего не получилось, возвращаем последнюю ошибку
-			console.error("❌ [AUTH] All update attempts failed")
-			return {
-				data: null,
-				error: employeeError || userProfileError || new Error("Failed to update profile in any table")
+			// Возвращаем результат в зависимости от успеха операций
+			if (userProfileSuccess || employeeSuccess) {
+				console.log("✅ [AUTH] Profile update completed successfully")
+				return {
+					data: userProfileSuccess ? { ...cleanUpdates, updated_at: new Date().toISOString() } : employeeData,
+					error: null
+				}
+			} else {
+				console.error("❌ [AUTH] All update attempts failed")
+				return {
+					data: null,
+					error: new Error("Failed to update profile in any table")
+				}
 			}
 
 		} catch (error) {

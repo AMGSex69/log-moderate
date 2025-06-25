@@ -45,9 +45,13 @@ export default function EditProfilePage() {
 
 		setLoading(true)
 		try {
+			// Определяем количество часов в зависимости от графика
+			const workHours = workSchedule === "2/2" ? 12 : 9
+
 			const { error } = await authService.updateProfile(user.id, {
 				full_name: fullName.trim(),
 				work_schedule: workSchedule,
+				work_hours: workHours,
 				position: position.trim() || "Сотрудник",
 			})
 
@@ -125,8 +129,8 @@ export default function EditProfilePage() {
 											<SelectValue placeholder="Выберите график работы" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="8+1">8 часов + 1 час обед (9 часов)</SelectItem>
-											<SelectItem value="12">12 часов</SelectItem>
+											<SelectItem value="5/2">5/2 - 9 часов (8 работы + 1 час обед)</SelectItem>
+											<SelectItem value="2/2">2/2 - 12 часов (11 работы + 1 час обед)</SelectItem>
 										</SelectContent>
 									</Select>
 									<div className="text-sm text-muted-foreground">

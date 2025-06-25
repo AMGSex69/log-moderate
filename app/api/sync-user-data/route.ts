@@ -3,11 +3,19 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
 	try {
+		// Получаем токен из заголовков
+		const authHeader = request.headers.get('authorization')
+		if (!authHeader || !authHeader.startsWith('Bearer ')) {
+			return NextResponse.json({ error: 'No authorization token' }, { status: 401 })
+		}
 
-		// Получаем данные пользователя
-		const { data: { user }, error: authError } = await supabase.auth.getUser()
+		const token = authHeader.substring(7)
+
+		// Получаем данные пользователя с токеном
+		const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
 		if (authError || !user) {
+			console.error('❌ [SYNC-API] Auth error:', authError)
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 		}
 

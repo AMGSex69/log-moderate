@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useToast } from "@/hooks/use-toast"
 import { Clock, Play, Pause, LogOut, AlertTriangle, CheckCircle, Users } from "lucide-react"
 import { format } from "date-fns"
+import { useProfileSync } from "@/lib/profile-sync"
 
 interface WorkSessionData {
 	id?: string
@@ -40,8 +41,11 @@ interface WorkSessionEnhancedProps {
 }
 
 export default function WorkSessionEnhanced({ onSessionChange, activeTasks = [], onForceStopAllTasks }: WorkSessionEnhancedProps) {
-	const { user, profile } = useAuth()
+	const { user, profile, refreshProfile } = useAuth()
 	const { toast } = useToast()
+
+	// Подписка на обновления профиля
+	useProfileSync(user?.id || null, refreshProfile)
 
 	const [sessionData, setSessionData] = useState<WorkSessionData>({
 		clockInTime: null,
@@ -73,12 +77,37 @@ export default function WorkSessionEnhanced({ onSessionChange, activeTasks = [],
 		return () => clearInterval(interval)
 	}, [])
 
+	// Мемоизированная функция для получения рабочих часов
+	const getWorkHours = useCallback(() => {
+		if (!profile?.work_schedule) {
+			return 9
+		}
+
+		const hours = profile.work_schedule === "2/2" ? 12 : 9
+		return hours
+	}, [profile?.work_schedule])
+
 	// ИСПРАВЛЕНО: Загружаем данные только при монтировании и изменении пользователя
 	useEffect(() => {
 		if (user) {
 			loadSessionData()
 		}
 	}, [user])
+
+	// Пересчитываем время окончания при изменении графика работы
+	useEffect(() => {
+		if (sessionData.clockInTime && profile?.work_schedule) {
+			const workHours = getWorkHours()
+			const newExpectedEnd = new Date(sessionData.clockInTime.getTime() + workHours * 60 * 60 * 1000)
+
+			if (sessionData.expectedEndTime?.getTime() !== newExpectedEnd.getTime()) {
+				setSessionData(prev => ({
+					...prev,
+					expectedEndTime: newExpectedEnd
+				}))
+			}
+		}
+	}, [profile?.work_schedule, sessionData.clockInTime, getWorkHours])
 
 	// Мемоизированная функция загрузки данных сессии - ИСПРАВЛЕНО: убираем циклические зависимости
 	const loadSessionData = useCallback(async () => {
@@ -230,11 +259,6 @@ export default function WorkSessionEnhanced({ onSessionChange, activeTasks = [],
 			sessionLoadingRef.current = false
 		}
 	}, [user, onSessionChange, toast])
-
-	const getWorkHours = () => {
-		if (!profile?.work_schedule) return 9
-		return profile.work_schedule === "12" ? 12 : 9 // 8+1 = 9 часов
-	}
 
 	const handleClockIn = async (confirmed = false) => {
 		console.log("🎯 handleClockIn: Начало функции, confirmed =", confirmed)

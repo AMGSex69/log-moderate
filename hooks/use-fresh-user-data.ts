@@ -47,17 +47,38 @@ export function useFreshUserData() {
 					.from("employees")
 					.select(`
 						*,
-						offices(name)
+						offices!office_id(name)
 					`)
 					.eq("user_id", user.id)
 					.maybeSingle()
 
 				if (!employeeError && employeeData) {
 					console.log("✅ [FRESH] Employee data loaded:", employeeData)
+
+					// ВАЖНО: Проверяем аватарку из user_profiles (приоритет для аватарок)
+					let avatarUrl = employeeData.avatar_url || null
+
+					// Если аватарка пустая или это дефолтная Gravatar, пробуем загрузить из user_profiles
+					if (!avatarUrl || (avatarUrl && avatarUrl.includes('gravatar.com'))) {
+						console.log("🖼️ [FRESH-AVATAR] Загружаем аватарку из user_profiles...")
+						const { data: userProfileData, error: userProfileError } = await supabase
+							.from("user_profiles")
+							.select("avatar_url")
+							.eq("id", user.id)
+							.maybeSingle()
+
+						if (!userProfileError && userProfileData?.avatar_url) {
+							avatarUrl = userProfileData.avatar_url
+							console.log("✅ [FRESH-AVATAR] Аватарка загружена из user_profiles:", avatarUrl)
+						} else {
+							console.log("ℹ️ [FRESH-AVATAR] Аватарка из user_profiles не найдена, используем из employees")
+						}
+					}
+
 					setFreshData({
 						full_name: employeeData.full_name || null,
 						position: employeeData.position || null,
-						avatar_url: employeeData.avatar_url || null,
+						avatar_url: avatarUrl,
 						office_name: employeeData.offices?.name || employeeData.office_name || null,
 						is_admin: employeeData.is_admin || false,
 						loading: false

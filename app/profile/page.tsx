@@ -12,6 +12,7 @@ import { DetailedProfileStats } from "@/components/detailed-profile-stats"
 import { supabase } from "@/lib/supabase"
 import { authService } from "@/lib/auth"
 import { useAuth } from "@/hooks/use-auth"
+import { useProfileSync } from "@/lib/profile-sync"
 import { useFreshUserData } from "@/hooks/use-fresh-user-data"
 import { formatDuration } from "@/lib/utils"
 import { GAME_CONFIG, calculateLevel } from "@/lib/game-config"
@@ -81,11 +82,16 @@ interface ProfileData {
 	email: string
 	office_name: string
 	avatar_url?: string
+	work_schedule: string
+	work_hours: number
 }
 
 export default function ProfilePage() {
 	const { user, profile, refreshProfile } = useAuth()
 	const { refresh: refreshUserData, ...freshUserData } = useFreshUserData()
+
+	// Подписка на обновления профиля
+	useProfileSync(user?.id || null, refreshProfile)
 	const router = useRouter()
 	const { toast } = useToast()
 	const [achievements, setAchievements] = useState<Achievement[]>([])
@@ -121,7 +127,9 @@ export default function ProfilePage() {
 		position: "",
 		email: "",
 		office_name: "",
-		avatar_url: ""
+		avatar_url: "",
+		work_schedule: "5/2",
+		work_hours: 9
 	})
 	const [editingProfile, setEditingProfile] = useState(false)
 	const [loading, setLoading] = useState(true)
@@ -567,13 +575,33 @@ export default function ProfilePage() {
 				.from("employees")
 				.select(`
 					*,
-					offices(name)
+					offices!office_id(name)
 				`)
 				.eq("user_id", user.id)
 				.maybeSingle()
 
 			if (!employeeError && employeeData) {
 				console.log("✅ [EDIT-LOAD] Employee data loaded:", employeeData)
+
+				// ВАЖНО: Проверяем аватарку из user_profiles (приоритет для аватарок)
+				let avatarUrl = employeeData.avatar_url || ""
+
+				// Если аватарка пустая или это дефолтная Gravatar, пробуем загрузить из user_profiles
+				if (!avatarUrl || avatarUrl.includes('gravatar.com')) {
+					console.log("🖼️ [EDIT-AVATAR] Загружаем аватарку из user_profiles...")
+					const { data: userProfileData, error: userProfileError } = await supabase
+						.from("user_profiles")
+						.select("avatar_url")
+						.eq("id", user.id)
+						.maybeSingle()
+
+					if (!userProfileError && userProfileData?.avatar_url) {
+						avatarUrl = userProfileData.avatar_url
+						console.log("✅ [EDIT-AVATAR] Аватарка загружена из user_profiles:", avatarUrl)
+					} else {
+						console.log("ℹ️ [EDIT-AVATAR] Аватарка из user_profiles не найдена, используем из employees")
+					}
+				}
 
 				// Парсим полное имя на части
 				const nameParts = (employeeData.full_name || "").split(' ')
@@ -589,7 +617,9 @@ export default function ProfilePage() {
 					position: employeeData.position || "Сотрудник",
 					email: user.email || "",
 					office_name: employeeData.offices?.name || employeeData.office_name || "Не указан",
-					avatar_url: employeeData.avatar_url || ""
+					avatar_url: avatarUrl, // Используем приоритетную аватарку
+					work_schedule: employeeData.work_schedule || "5/2",
+					work_hours: employeeData.work_hours || 9
 				}
 
 				console.log("📋 [EDIT-LOAD] Устанавливаем свежие данные в форму:", freshProfileData)
@@ -622,7 +652,9 @@ export default function ProfilePage() {
 					position: profileData.position || "Сотрудник",
 					email: user.email || "",
 					office_name: profileData.office_name || "Не указан",
-					avatar_url: profileData.avatar_url || ""
+					avatar_url: profileData.avatar_url || "",
+					work_schedule: profileData.work_schedule || "5/2",
+					work_hours: profileData.work_hours || 9
 				}
 
 				console.log("📋 [EDIT-LOAD] Устанавливаем данные профиля в форму:", freshProfileData)
@@ -646,7 +678,7 @@ export default function ProfilePage() {
 				.from("employees")
 				.select(`
 					*,
-					offices(name)
+					offices!office_id(name)
 				`)
 				.eq("user_id", user.id)
 				.maybeSingle()
@@ -680,6 +712,26 @@ export default function ProfilePage() {
 			}
 
 			if (profileSource) {
+				// ВАЖНО: Проверяем аватарку из user_profiles (приоритет для аватарок)
+				let avatarUrl = profileSource.avatar_url || ""
+
+				// Если аватарка пустая или это дефолтная Gravatar, пробуем загрузить из user_profiles
+				if (!avatarUrl || avatarUrl.includes('gravatar.com')) {
+					console.log("🖼️ [AVATAR] Загружаем аватарку из user_profiles...")
+					const { data: userProfileData, error: userProfileError } = await supabase
+						.from("user_profiles")
+						.select("avatar_url")
+						.eq("id", user.id)
+						.maybeSingle()
+
+					if (!userProfileError && userProfileData?.avatar_url) {
+						avatarUrl = userProfileData.avatar_url
+						console.log("✅ [AVATAR] Аватарка загружена из user_profiles:", avatarUrl)
+					} else {
+						console.log("ℹ️ [AVATAR] Аватарка из user_profiles не найдена, используем из employees")
+					}
+				}
+
 				// Парсим полное имя на части
 				const nameParts = (profileSource.full_name || "").split(' ')
 				const lastName = nameParts[0] || ""
@@ -691,10 +743,12 @@ export default function ProfilePage() {
 					last_name: lastName,
 					first_name: firstName,
 					middle_name: middleName,
-					position: profileSource.position || "Сотрудник",
+					position: profileSource.position || "", // НЕ заменяем на дефолт
 					email: user.email || "",
 					office_name: profileSource.office_name || "Не указан",
-					avatar_url: profileSource.avatar_url || ""
+					avatar_url: avatarUrl, // Используем приоритетную аватарку
+					work_schedule: profileSource.work_schedule || "5/2",
+					work_hours: profileSource.work_hours || 9
 				}
 
 				console.log("📋 [PROFILE] Новые данные профиля:", newProfileData)
@@ -713,10 +767,12 @@ export default function ProfilePage() {
 						last_name: lastName,
 						first_name: firstName,
 						middle_name: middleName,
-						position: profile.position || "Сотрудник",
+						position: profile.position || "", // НЕ заменяем на дефолт
 						email: user.email || "",
 						office_name: profile.office_name || "Не указан",
-						avatar_url: profile.avatar_url || ""
+						avatar_url: profile.avatar_url || "",
+						work_schedule: profile.work_schedule || "5/2",
+						work_hours: profile.work_hours || 9
 					})
 				}
 			}
@@ -741,6 +797,10 @@ export default function ProfilePage() {
 				full_name: profileData.full_name?.trim() || undefined,
 				position: profileData.position?.trim() || undefined,
 			}
+
+			console.log("🔍 [ДАННЫЕ] Исходные данные profileData.position:", profileData.position)
+			console.log("🔍 [ДАННЫЕ] После trim:", profileData.position?.trim())
+			console.log("🔍 [ДАННЫЕ] Финальное значение position:", updateData.position)
 
 			// Добавляем avatar_url только если он есть
 			if (profileData.avatar_url) {
@@ -790,56 +850,27 @@ export default function ProfilePage() {
 			console.log("✅ [ОБНОВЛЕНИЕ] Свежие данные обновлены")
 
 			console.log("🔄 [ОБНОВЛЕНИЕ] Перезагружаем локальные данные...")
-			// ПРИНУДИТЕЛЬНО синхронизируем данные между таблицами
-			try {
-				console.log("🔄 [СИНХРОНИЗАЦИЯ] Принудительная синхронизация данных...")
 
-				// Вызываем API для синхронизации
-				const syncResponse = await fetch('/api/sync-user-data', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					}
-				})
+			// УБИРАЕМ принудительную синхронизацию, которая перезаписывает изменения
+			// Теперь updateProfile обновляет обе таблицы синхронно
 
-				if (syncResponse.ok) {
-					const syncResult = await syncResponse.json()
-					console.log("✅ [СИНХРОНИЗАЦИЯ] API результат:", syncResult)
-				} else {
-					console.warn("⚠️ [СИНХРОНИЗАЦИЯ] API ошибка:", syncResponse.status)
-
-					// Fallback на прямой вызов RPC
-					const { data: rpcResult, error: rpcError } = await supabase
-						.rpc('sync_employee_to_userprofile', {
-							target_user_id: user!.id
-						})
-
-					if (rpcError) {
-						console.warn("⚠️ [СИНХРОНИЗАЦИЯ] RPC ошибка:", rpcError)
-					} else {
-						console.log("✅ [СИНХРОНИЗАЦИЯ] RPC результат:", rpcResult)
-					}
-				}
-			} catch (syncErr) {
-				console.warn("⚠️ [СИНХРОНИЗАЦИЯ] Критическая ошибка:", syncErr)
-			}
-
-			// Обновляем локальные данные профиля
-			await fetchProfileInfo()
-			console.log("✅ [ОБНОВЛЕНИЕ] Локальные данные обновлены")
-
-			// Обновляем статистику офиса (офис может измениться через админку)
+			// Обновляем статистику офиса
 			console.log("🏢 [ОБНОВЛЕНИЕ] Обновляем статистику офиса...")
 			await fetchOfficeStats()
 			console.log("✅ [ОБНОВЛЕНИЕ] Статистика офиса обновлена")
 
+			// Обновляем локальные данные
+			console.log("🔄 [ОБНОВЛЕНИЕ] Обновляем локальные данные...")
+			await fetchProfileInfo()
+			console.log("✅ [ОБНОВЛЕНИЕ] Локальные данные обновлены")
+
 			console.log("🔄 [ОБНОВЛЕНИЕ] Закрываем режим редактирования")
-			// Увеличиваем задержку для лучшей видимости анимации
+			// Небольшая задержка для показа анимации успеха
 			setTimeout(() => {
 				console.log("🔄 [АНИМАЦИЯ] Закрываем редактирование и сбрасываем success")
 				setEditingProfile(false)
 				setSaveSuccess(false) // Сбрасываем состояние успеха
-			}, 2500)
+			}, 2000) // Уменьшили время, т.к. нет синхронизации
 
 		} catch (error) {
 			console.error("❌ [КРИТИЧЕСКАЯ ОШИБКА] Ошибка в handleSaveProfile:", error)
@@ -972,8 +1003,15 @@ export default function ProfilePage() {
 										<h1 className="font-mono font-black text-2xl text-black uppercase tracking-wide">
 											{freshUserData.full_name || profileData.full_name || "ЗАГРУЗКА..."}
 										</h1>
-										<div className="bg-white border border-black px-2 py-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
-											<span className="font-mono text-sm font-semibold text-black uppercase">{freshUserData.position || profileData.position || "Сотрудник"}</span>
+										<div className="flex gap-2">
+											<div className="bg-white border border-black px-2 py-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+												<span className="font-mono text-sm font-semibold text-black uppercase">{freshUserData.position || profileData.position || "Должность не указана"}</span>
+											</div>
+											<div className="bg-gradient-to-r from-blue-400 to-indigo-500 border border-black px-2 py-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+												<span className="font-mono text-sm font-semibold text-white uppercase">
+													⏰ {profile?.work_schedule || "5/2"} ({profile?.work_hours || 9}ч)
+												</span>
+											</div>
 										</div>
 									</div>
 								</div>
