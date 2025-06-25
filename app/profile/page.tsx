@@ -160,29 +160,37 @@ export default function ProfilePage() {
 		}
 	}, [profileData.avatar_url, profileData.full_name, profileData.position, profileData.office_name])
 
-	// useEffect для периодического обновления статистики
+
+
+	// Слушатель обновления монет с главной страницы
 	useEffect(() => {
 		if (!user) return
 
-		const interval = setInterval(async () => {
-			console.log("🔄 [PROFILE-AUTO-UPDATE] Автоматическое обновление статистики профиля")
+		const handleCoinsUpdate = async (event: Event) => {
+			const customEvent = event as CustomEvent
+			const { userId, newCoins } = customEvent.detail
 
-			// Получаем актуальные монеты из базы
-			const { data: userProfileData } = await supabase
-				.from("user_profiles")
-				.select("coins, level")
-				.eq("id", user.id)
-				.single()
+			console.log("💰 [ПРОФИЛЬ] Получено событие обновления монет:", customEvent.detail)
 
-			if (userProfileData) {
+			// Если обновлены монеты текущего пользователя
+			if (userId === user.id) {
+				console.log("✨ [ПРОФИЛЬ] Монеты текущего пользователя обновлены, синхронизируем...")
+
+				// Обновляем статистику с новыми монетами
 				setStats(prev => ({
 					...prev,
-					total_coins: userProfileData.coins || 0
+					total_coins: newCoins
 				}))
 			}
-		}, 5000) // Обновляем каждые 5 секунд
+		}
 
-		return () => clearInterval(interval)
+		// Добавляем слушатель
+		window.addEventListener('coinsUpdated', handleCoinsUpdate)
+
+		// Очистка при размонтировании
+		return () => {
+			window.removeEventListener('coinsUpdated', handleCoinsUpdate)
+		}
 	}, [user])
 
 	// Слушатель изменений офиса из админки

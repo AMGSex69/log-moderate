@@ -835,6 +835,11 @@ export default function Home() {
 					console.error("❌ Ошибка обновления монет в БД:", updateError)
 				} else {
 					console.log("✅ Монеты обновлены в БД:", newTotalCoins)
+
+					// Отправляем событие для обновления профиля
+					window.dispatchEvent(new CustomEvent('coinsUpdated', {
+						detail: { userId: user.id, newCoins: newTotalCoins }
+					}))
 				}
 			} catch (error) {
 				console.error("❌ Ошибка сохранения монет:", error)
@@ -1072,6 +1077,11 @@ export default function Home() {
 					console.error("❌ Ошибка обновления монет в БД (постфактум):", updateError)
 				} else {
 					console.log("✅ Монеты обновлены в БД (постфактум):", newTotalCoins)
+
+					// Отправляем событие для обновления профиля
+					window.dispatchEvent(new CustomEvent('coinsUpdated', {
+						detail: { userId: user!.id, newCoins: newTotalCoins }
+					}))
 				}
 			} catch (error) {
 				console.error("❌ Ошибка сохранения монет (постфактум):", error)
