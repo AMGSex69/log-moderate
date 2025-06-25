@@ -211,16 +211,16 @@ export default function UserProfileModal({
 
 	const fetchUserStats = async (userId: string) => {
 		try {
-			// Получаем employee_id из user_profiles
+			// Получаем данные пользователя с монетами из user_profiles
 			const { data: userProfile } = await supabase
 				.from("user_profiles")
-				.select("employee_id")
+				.select("employee_id, coins, level")
 				.eq("id", userId)
 				.single()
 
 			if (!userProfile?.employee_id) return null
 
-			// Получаем статистику задач
+			// Получаем статистику задач (НЕ для расчета монет)
 			const { data: taskLogs } = await supabase
 				.from("task_logs")
 				.select(`
@@ -237,16 +237,9 @@ export default function UserProfileModal({
 			const totalTasks = taskLogs.length
 			const totalUnits = taskLogs.reduce((sum, log) => sum + log.units_completed, 0)
 
-			// Рассчитываем общие монеты
-			let totalCoins = 0
-			taskLogs.forEach((log: any) => {
-				const taskName = log.task_types?.name
-				const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskName] || 5
-				totalCoins += log.units_completed * coinsPerUnit
-			})
-
-			// Рассчитываем уровень
-			const levelInfo = calculateLevel(totalCoins)
+			// Используем монеты и уровень из user_profiles (НЕ рассчитываем)
+			const totalCoins = userProfile.coins || 0
+			const level = userProfile.level || 1
 
 			// Рассчитываем текущий стрим
 			const currentStreak = calculateCurrentStreak(taskLogs)
@@ -273,7 +266,7 @@ export default function UserProfileModal({
 				total_tasks: totalTasks,
 				total_units: totalUnits,
 				total_coins: totalCoins,
-				level: levelInfo.level,
+				level: level,
 				current_streak: currentStreak,
 				best_tasks: bestTasks
 			}

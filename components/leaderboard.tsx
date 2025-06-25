@@ -49,12 +49,32 @@ export default function Leaderboard() {
 	const fetchLeaderboard = async () => {
 		setLoading(true)
 		try {
+			// Получаем всех пользователей из офиса с их монетами из user_profiles
+			const { data: usersData, error: usersError } = await supabase
+				.from("user_profiles")
+				.select(`
+					id,
+					employee_id,
+					full_name,
+					coins,
+					level,
+					offices!user_profiles_office_id_fkey(name)
+				`)
+				.eq("offices.name", "Рассвет")
+				.not("employee_id", "is", null)
+
+			if (usersError) {
+				console.error("❌ Ошибка запроса пользователей:", usersError)
+				throw usersError
+			}
+
+			console.log("👥 Пользователи из офиса:", usersData?.length, "человек")
+
+			// Получаем статистику задач для расчета единиц и времени
 			let query = supabase
 				.from("task_logs")
-				.select(
-					"employee_id, units_completed, time_spent_minutes, task_type_id, employees(full_name, user_id, offices!office_id(name)), task_types(name)",
-				)
-				.eq("employees.offices.name", "Рассвет")
+				.select("employee_id, units_completed, time_spent_minutes, work_date")
+				.in("employee_id", usersData?.map(u => u.employee_id) || [])
 
 			// Фильтр по времени
 			if (timeframe !== "all") {
@@ -69,22 +89,36 @@ export default function Leaderboard() {
 				query = query.eq("task_type_id", Number.parseInt(selectedTask))
 			}
 
-			const { data, error } = await query
+			const { data: taskData, error: taskError } = await query
 
-			if (error) {
-				console.error("❌ Ошибка запроса лидерборда:", error)
-				throw error
+			if (taskError) {
+				console.error("❌ Ошибка запроса задач:", taskError)
+				throw taskError
 			}
 
-			console.log("📊 Данные лидерборда:", data?.length, "записей")
+			console.log("📊 Данные задач:", taskData?.length, "записей")
 
-			// Группируем по сотрудникам со всей статистикой
+			// Группируем статистику по сотрудникам
 			const statsMap = new Map<string, LeaderboardEntry>()
-
-			// Сначала собираем уникальные даты для подсчета рабочих дней
 			const employeeWorkDays = new Map<string, Set<string>>()
 
-			data?.forEach((log: any) => {
+			// Инициализируем всех пользователей с их монетами из базы
+			usersData?.forEach((user: any) => {
+				statsMap.set(user.employee_id, {
+					employee_id: user.employee_id,
+					user_id: user.id,
+					full_name: user.full_name,
+					total_units: 0,
+					total_time: 0,
+					total_tasks: 0,
+					total_coins: user.coins || 0, // Используем монеты из user_profiles
+					work_days: 0,
+					avg_time_per_unit: 0,
+				})
+			})
+
+			// Добавляем статистику из task_logs
+			taskData?.forEach((log: any) => {
 				const employeeId = log.employee_id
 				const workDate = log.work_date
 
@@ -94,42 +128,26 @@ export default function Leaderboard() {
 				}
 				employeeWorkDays.get(employeeId)?.add(workDate)
 
-				const existing = statsMap.get(employeeId) || {
-					employee_id: employeeId,
-					user_id: log.employees.user_id,
-					full_name: log.employees.full_name,
-					total_units: 0,
-					total_time: 0,
-					total_tasks: 0,
-					total_coins: 0,
-					work_days: 0,
-					avg_time_per_unit: 0,
+				const existing = statsMap.get(employeeId)
+				if (existing) {
+					existing.total_tasks += 1
+					existing.total_time += log.time_spent_minutes
+					existing.total_units += log.units_completed
+					existing.work_days = employeeWorkDays.get(employeeId)?.size || 0
+					// НЕ рассчитываем монеты - используем из user_profiles
 				}
-
-				existing.total_tasks += 1
-				existing.total_time += log.time_spent_minutes
-				existing.total_units += log.units_completed
-				existing.work_days = employeeWorkDays.get(employeeId)?.size || 0
-
-				// Рассчитываем монеты по конфигурации
-				const taskName = log.task_types.name
-				const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskName] || 5
-				existing.total_coins += log.units_completed * coinsPerUnit
-
-				statsMap.set(employeeId, existing)
 			})
 
-			// Показываем только сотрудников с выполненными задачами
-			console.log("📈 Сотрудников с задачами:", statsMap.size)
+			// Показываем всех сотрудников (даже без задач, если у них есть монеты)
+			console.log("📈 Всего сотрудников:", statsMap.size)
 
-			// Рассчитываем среднее время и сортируем
+			// Рассчитываем среднее время и сортируем по монетам
 			const sortedStats = Array.from(statsMap.values())
 				.map((stat) => ({
 					...stat,
 					avg_time_per_unit: stat.total_units > 0 ? Math.round(stat.total_time / stat.total_units) : 0,
 				}))
-				.filter((stat) => stat.total_tasks > 0) // Показываем только тех, кто работал
-				.sort((a, b) => b.total_time - a.total_time) // Сортируем по часам работы
+				.sort((a, b) => b.total_coins - a.total_coins) // Сортируем по монетам из базы
 
 			setLeaderboard(sortedStats)
 			console.log("✅ Лидерборд установлен:", sortedStats.length, "сотрудников")

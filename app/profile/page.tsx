@@ -281,19 +281,15 @@ export default function ProfilePage() {
 		const { employeeId, error: empError } = await authService.getEmployeeId(user!.id)
 		if (empError || !employeeId) return
 
-		// Получаем текущий офис пользователя
-		let currentOfficeId = profile?.office_id
+		// Получаем монеты и уровень из user_profiles
+		const { data: userProfileData } = await supabase
+			.from("user_profiles")
+			.select("coins, level, office_id")
+			.eq("id", user!.id)
+			.single()
 
-		// Если офис не найден, получаем из employees
-		if (!currentOfficeId) {
-			const { data: empData } = await supabase
-				.from("user_profiles")
-				.select("office_id")
-				.eq("id", user!.id)
-				.single()
-
-			currentOfficeId = empData?.office_id
-		}
+		const totalCoins = userProfileData?.coins || 0
+		const currentOfficeId = userProfileData?.office_id
 
 		console.log("📊 [PROFILE-STATS] Загружаем статистику для офиса:", currentOfficeId)
 
@@ -334,13 +330,7 @@ export default function ProfilePage() {
 		const totalTime = logsData?.reduce((sum, log) => sum + log.time_spent_minutes, 0) || 0
 		const totalUnits = logsData?.reduce((sum, log) => sum + log.units_completed, 0) || 0
 
-		// Рассчитываем монеты
-		let totalCoins = 0
-		logsData?.forEach((log: any) => {
-			const taskName = log.task_types?.name
-			const coinsPerUnit = GAME_CONFIG.TASK_REWARDS[taskName] || 5
-			totalCoins += log.units_completed * coinsPerUnit
-		})
+		// Используем монеты из user_profiles (НЕ рассчитываем)
 
 		// Находим самый продуктивный день
 		const dayStats = new Map<string, number>()
