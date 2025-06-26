@@ -641,11 +641,11 @@ export default function ProfilePage() {
 					}
 				}
 
-				// Парсим полное имя на части
+				// Парсим полное имя на части (Имя Фамилия Отчество)
 				const nameParts = (employeeData.full_name || "").split(' ')
-				const lastName = nameParts[0] || ""
-				const firstName = nameParts[1] || ""
-				const middleName = nameParts[2] || ""
+				const firstName = nameParts[0] || ""   // Имя = первая часть
+				const lastName = nameParts[1] || ""    // Фамилия = вторая часть
+				const middleName = nameParts[2] || ""  // Отчество = третья часть
 
 				const freshProfileData = {
 					full_name: employeeData.full_name || "",
@@ -678,9 +678,9 @@ export default function ProfilePage() {
 				console.log("✅ [EDIT-LOAD] Profile data loaded:", profileData)
 
 				const nameParts = (profileData.full_name || "").split(' ')
-				const lastName = nameParts[0] || ""
-				const firstName = nameParts[1] || ""
-				const middleName = nameParts[2] || ""
+				const firstName = nameParts[0] || ""   // Имя = первая часть
+				const lastName = nameParts[1] || ""    // Фамилия = вторая часть
+				const middleName = nameParts[2] || ""  // Отчество = третья часть
 
 				const freshProfileData = {
 					full_name: profileData.full_name || "",
@@ -770,11 +770,11 @@ export default function ProfilePage() {
 					}
 				}
 
-				// Парсим полное имя на части
+				// Парсим полное имя на части (Имя Фамилия Отчество)
 				const nameParts = (profileSource.full_name || "").split(' ')
-				const lastName = nameParts[0] || ""
-				const firstName = nameParts[1] || ""
-				const middleName = nameParts[2] || ""
+				const firstName = nameParts[0] || ""   // Имя = первая часть
+				const lastName = nameParts[1] || ""    // Фамилия = вторая часть
+				const middleName = nameParts[2] || ""  // Отчество = третья часть
 
 				const newProfileData = {
 					full_name: profileSource.full_name || "",
@@ -796,9 +796,9 @@ export default function ProfilePage() {
 				// Фоллбэк на старые данные из profile
 				if (profile) {
 					const nameParts = (profile.full_name || "").split(' ')
-					const lastName = nameParts[0] || ""
-					const firstName = nameParts[1] || ""
-					const middleName = nameParts[2] || ""
+					const firstName = nameParts[0] || ""   // Имя = первая часть
+					const lastName = nameParts[1] || ""    // Фамилия = вторая часть
+					const middleName = nameParts[2] || ""  // Отчество = третья часть
 
 					setProfileData({
 						full_name: profile.full_name || "",
@@ -1194,7 +1194,7 @@ export default function ProfilePage() {
 													setProfileData(prev => ({
 														...prev,
 														last_name: newLastName,
-														full_name: `${newLastName} ${prev.first_name} ${prev.middle_name}`.trim()
+														full_name: `${prev.first_name} ${newLastName} ${prev.middle_name}`.trim()
 													}))
 												}}
 												placeholder="Иванов"
@@ -1214,7 +1214,7 @@ export default function ProfilePage() {
 													setProfileData(prev => ({
 														...prev,
 														first_name: newFirstName,
-														full_name: `${prev.last_name} ${newFirstName} ${prev.middle_name}`.trim()
+														full_name: `${newFirstName} ${prev.last_name} ${prev.middle_name}`.trim()
 													}))
 												}}
 												placeholder="Иван"
@@ -1234,7 +1234,7 @@ export default function ProfilePage() {
 													setProfileData(prev => ({
 														...prev,
 														middle_name: newMiddleName,
-														full_name: `${prev.last_name} ${prev.first_name} ${newMiddleName}`.trim()
+														full_name: `${prev.first_name} ${prev.last_name} ${newMiddleName}`.trim()
 													}))
 												}}
 												placeholder="Иванович"

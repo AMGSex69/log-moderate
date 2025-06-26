@@ -120,11 +120,13 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 			} else if (error.message?.includes('Email rate limit exceeded')) {
 				errorMessage = "Слишком много попыток регистрации. Подождите несколько минут."
 			} else if (error.message?.includes('User already registered')) {
-				errorMessage = "Пользователь с таким email уже зарегистрирован"
+				errorMessage = "Пользователь с таким email уже зарегистрирован. Если вы забыли пароль, используйте функцию восстановления. Если проблема повторяется, обратитесь к администратору."
 			} else if (error.message?.includes('Invalid email')) {
 				errorMessage = "Неверный формат email адреса"
 			} else if (error.message?.includes('Password should be at least')) {
 				errorMessage = "Пароль должен быть не менее 6 символов"
+			} else if (error.message?.includes('422')) {
+				errorMessage = "Ошибка регистрации. Возможно, этот email уже используется. Попробуйте войти в систему или обратитесь к администратору."
 			}
 
 			toast({
